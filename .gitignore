@@ -1,0 +1,16 @@
+.envrc
+node_modules
+.codex/.personality_migration
+.codex/AGENTS.md
+.codex/auth.json
+.codex/history.jsonl
+.codex/log
+.codex/models_cache.json
+.codex/node_modules
+.codex/package-lock.json
+.codex/package.json
+.codex/shell_snapshots
+.codex/skills/.system
+.codex/tmp
+.codex/version.json
+.venv

@@ -1,0 +1,36 @@
+# [codex] セクション
+# codex_home_relative:
+#   - codex cli のホームディレクトリ
+#   - リポジトリルートからの相対パス
+[codex]
+codex_home_relative = ".codex"
+
+# [git] セクション
+# user_name:
+#   - git user.name に反映する値
+# user_email:
+#   - git user.email に反映する値
+[git]
+# user_name = "Taro Yamada"
+# user_email = "taro@example.com"
+
+# [clangd] セクション
+# enable:
+#   - clangd を利用するプロジェクトであるかどうか
+# exclude_path:
+#   - .clangd の CompileFlags.PathMatch 生成対象から除外するパス
+# background_skip_path:
+#   - .clangd に Index.Background: Skip を出力するパス
+[clangd]
+enable = false
+exclude_path = []
+background_skip_path = []
+
+# [serena] セクション
+# enable:
+#   - serena を利用するプロジェクトであるかどうか
+# ignored_paths:
+#   - .serena/project.yml に ignored_paths を出力するパス
+[serena]
+enable = false
+ignored_paths = []
