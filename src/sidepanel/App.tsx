@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import type {
   AttachSelectionResult,
   CapturePageContextResult,
@@ -33,6 +33,7 @@ type MessageStatusTone = 'normal' | 'warn' | 'alert' | 'error';
 const STREAM_WAIT_WARN_MS = 10_000;
 const STREAM_WAIT_ALERT_MS = 25_000;
 const STREAM_STALE_WARN_MS = 12_000;
+const FAST_SCROLL_DURATION_MS = 140;
 
 function StatusBadge({ status }: { status: WsStatus }): JSX.Element {
   return <span className={`status status-${status}`}>{status}</span>;
@@ -307,6 +308,7 @@ function MessageList(props: {
   nowTs: number;
   tokenTimestampByMessage: TokenTimestampByMessage;
   messageErrors: MessageErrors;
+  containerRef?: RefObject<HTMLDivElement | null>;
 }): JSX.Element {
   function toDisplayMarkdown(message: Message): string {
     const body = message.contentMd.trim();
@@ -328,7 +330,7 @@ function MessageList(props: {
 
   if (props.messages.length === 0) {
     return (
-      <div className="messages-empty">
+      <div ref={props.containerRef} className="messages-empty">
         <strong>No messages yet.</strong>
         <small>Start a chat from the input box below.</small>
       </div>
@@ -336,7 +338,7 @@ function MessageList(props: {
   }
 
   return (
-    <div className="messages">
+    <div ref={props.containerRef} className="messages">
       {props.messages.map((message) => {
         const statusMeta =
           message.role === 'assistant'
@@ -441,10 +443,13 @@ export function App(): JSX.Element {
   const [tokenTimestampByMessage, setTokenTimestampByMessage] = useState<TokenTimestampByMessage>({});
   const [messageErrors, setMessageErrors] = useState<MessageErrors>({});
   const [nowTs, setNowTs] = useState(() => Date.now());
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
   const [usageLimits, setUsageLimits] = useState<UsageLimits>({
     rateLimits: [],
     updatedAt: 0
   });
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const scrollAnimationFrameRef = useRef<number>();
 
   const currentMessages = useMemo(() => {
     if (!currentThreadId) {
@@ -500,6 +505,54 @@ export function App(): JSX.Element {
       globalThis.removeEventListener('keydown', onGlobalKeyDown);
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typeof scrollAnimationFrameRef.current === 'number') {
+        cancelAnimationFrame(scrollAnimationFrameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!shouldScrollToBottom) {
+      return;
+    }
+    const container = messagesContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (typeof scrollAnimationFrameRef.current === 'number') {
+      cancelAnimationFrame(scrollAnimationFrameRef.current);
+    }
+
+    const startTop = container.scrollTop;
+    const targetTop = container.scrollHeight;
+    const distance = targetTop - startTop;
+    if (Math.abs(distance) < 1) {
+      setShouldScrollToBottom(false);
+      return;
+    }
+
+    const startedAt = performance.now();
+    const step = (now: number): void => {
+      const elapsed = now - startedAt;
+      const progress = Math.min(1, elapsed / FAST_SCROLL_DURATION_MS);
+      const eased = 1 - (1 - progress) ** 3;
+      container.scrollTop = startTop + distance * eased;
+
+      if (progress < 1) {
+        scrollAnimationFrameRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      scrollAnimationFrameRef.current = undefined;
+      setShouldScrollToBottom(false);
+    };
+
+    scrollAnimationFrameRef.current = requestAnimationFrame(step);
+  }, [currentMessages, shouldScrollToBottom]);
 
   async function loadThreadsAndMaybeMessages(): Promise<void> {
     const list = await sendCommand<ListThreadsResult>({ type: 'LIST_THREADS', payload: {} });
@@ -880,6 +933,7 @@ export function App(): JSX.Element {
       });
 
       setMessagesByThread((prev) => ({ ...prev, [currentThreadId]: res.messages }));
+      setShouldScrollToBottom(true);
       await loadThreadsAndMaybeMessages();
       await consumeOnceContextIfNeeded(contextWillBeAttached);
       if (!contextWillBeAttached) {
@@ -1012,6 +1066,7 @@ export function App(): JSX.Element {
                   nowTs={nowTs}
                   tokenTimestampByMessage={tokenTimestampByMessage}
                   messageErrors={messageErrors}
+                  containerRef={messagesContainerRef}
                 />
               </div>
 
