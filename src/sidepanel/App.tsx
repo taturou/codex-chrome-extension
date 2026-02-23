@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import type {
   AttachSelectionResult,
+  CapturePageContextResult,
   CreateThreadResult,
+  DomSelectionStateResult,
   ListThreadsResult,
   MessagesResult,
   SettingsResult,
@@ -15,6 +17,8 @@ import { sendCommand, listenEvents } from '../shared/runtime';
 interface MessagesByThread {
   [threadId: string]: Message[];
 }
+
+type ContextMode = 'chat_only' | 'dom';
 
 function StatusBadge({ status }: { status: WsStatus }): JSX.Element {
   return <span className={`status status-${status}`}>{status}</span>;
@@ -118,7 +122,7 @@ function MessageList({ messages }: { messages: Message[] }): JSX.Element {
     const attachments = (message.attachments ?? [])
       .map((item, index) => {
         const source = item.url ? `出典URL: ${item.url}\n\n` : '';
-        return `### 添付 ${index + 1}\n\n${source}${item.text}`;
+        return `### 添付 ${index + 1} (${attachmentSummary(item)})\n\n${source}${item.text}`;
       })
       .join('\n\n');
 
@@ -197,6 +201,14 @@ async function requestActiveTabHostPermission(tab: chrome.tabs.Tab): Promise<voi
   }
 }
 
+function attachmentSummary(attachment: Attachment): string {
+  if (attachment.type === 'selected_text') {
+    return '選択範囲';
+  }
+  const scope = attachment.scope === 'dom_selection' ? 'DOM範囲' : '可視領域';
+  return `ページ参照(${scope})`;
+}
+
 export function App(): JSX.Element {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string>();
@@ -209,6 +221,9 @@ export function App(): JSX.Element {
   const [wsLogs, setWsLogs] = useState<WsDebugLogEntry[]>([]);
   const [copyNotice, setCopyNotice] = useState('');
   const [devMode, setDevMode] = useState(false);
+  const [contextMode, setContextMode] = useState<ContextMode>('chat_only');
+  const [domSelectionActive, setDomSelectionActive] = useState(false);
+  const [domSelectionCount, setDomSelectionCount] = useState(0);
 
   const currentMessages = useMemo(() => {
     if (!currentThreadId) {
@@ -219,6 +234,8 @@ export function App(): JSX.Element {
 
   const hasThread = Boolean(currentThreadId);
   const isConnected = status === 'connected';
+  const contextArmed = contextMode !== 'chat_only';
+  const hasAnyContentForSend = Boolean(input.trim() || pendingAttachments.length > 0 || contextArmed);
   const composerDisabled = !hasThread || !isConnected;
 
   const composerPlaceholder = useMemo(() => {
@@ -399,6 +416,147 @@ export function App(): JSX.Element {
     }
   }
 
+  const refreshDomSelectionState = useCallback(async (): Promise<void> => {
+    if (contextMode !== 'dom') {
+      setDomSelectionActive(false);
+      setDomSelectionCount(0);
+      return;
+    }
+
+    try {
+      const tab = await getAttachableActiveTab();
+      await requestActiveTabHostPermission(tab);
+      const result = await sendCommand<DomSelectionStateResult>({
+        type: 'GET_DOM_SELECTION_STATE',
+        payload: { tabId: tab.id }
+      });
+      setDomSelectionActive(result.active);
+      setDomSelectionCount(result.selectedCount);
+    } catch {
+      setDomSelectionActive(false);
+      setDomSelectionCount(0);
+    }
+  }, [contextMode]);
+
+  useEffect(() => {
+    if (contextMode !== 'dom') {
+      return;
+    }
+    void refreshDomSelectionState();
+    const id = globalThis.setInterval(() => {
+      void refreshDomSelectionState();
+    }, 900);
+    return () => {
+      clearInterval(id);
+    };
+  }, [contextMode, refreshDomSelectionState]);
+
+  async function activateDomSelectionMode(): Promise<void> {
+    const tab = await getAttachableActiveTab();
+    await requestActiveTabHostPermission(tab);
+    const result = await sendCommand<DomSelectionStateResult>({
+      type: 'START_DOM_SELECTION_MODE',
+      payload: { tabId: tab.id }
+    });
+    setContextMode('dom');
+    setDomSelectionActive(result.active);
+    setDomSelectionCount(result.selectedCount);
+    setStatusReason('DOM選択モードを開始しました。ページ上をクリックして選択/解除できます。');
+  }
+
+  async function stopDomSelectionMode(nextMode: 'chat_only'): Promise<void> {
+    try {
+      const tab = await getAttachableActiveTab();
+      await requestActiveTabHostPermission(tab);
+      const result = await sendCommand<DomSelectionStateResult>({
+        type: 'STOP_DOM_SELECTION_MODE',
+        payload: { tabId: tab.id }
+      });
+      setDomSelectionActive(result.active);
+      setDomSelectionCount(result.selectedCount);
+    } catch {
+      setDomSelectionActive(false);
+      setDomSelectionCount(0);
+    }
+    setContextMode(nextMode);
+  }
+
+  async function clearDomSelectionMode(options?: { silent?: boolean }): Promise<void> {
+    const silent = options?.silent ?? false;
+    try {
+      const tab = await getAttachableActiveTab();
+      await requestActiveTabHostPermission(tab);
+      const result = await sendCommand<DomSelectionStateResult>({
+        type: 'CLEAR_DOM_SELECTION',
+        payload: { tabId: tab.id }
+      });
+      setDomSelectionActive(result.active);
+      setDomSelectionCount(result.selectedCount);
+      if (!silent) {
+        setStatusReason('DOM選択を全解除しました。');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!silent) {
+        setStatusReason(`DOM選択の全解除に失敗: ${message}`);
+      }
+    }
+  }
+
+  async function changeContextMode(nextMode: ContextMode): Promise<void> {
+    if (nextMode === contextMode) {
+      return;
+    }
+
+    try {
+      if (nextMode === 'dom') {
+        await activateDomSelectionMode();
+        return;
+      }
+      if (contextMode === 'dom') {
+        await stopDomSelectionMode(nextMode);
+      } else {
+        setContextMode(nextMode);
+      }
+      setStatusReason('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusReason(`コンテキスト切替に失敗: ${message}`);
+    }
+  }
+
+  async function createContextAttachment(): Promise<Attachment | null> {
+    if (contextMode !== 'dom') {
+      return null;
+    }
+    const tab = await getAttachableActiveTab();
+    await requestActiveTabHostPermission(tab);
+
+    const result = await sendCommand<CapturePageContextResult>({
+      type: 'CAPTURE_PAGE_CONTEXT',
+      payload: { tabId: tab.id, source: 'dom_or_viewport', maxChars: 12000 }
+    });
+
+    const scope = result.source === 'dom_selection' ? 'DOM範囲' : '可視領域';
+    setStatusReason(`参照コンテキスト: ${scope}`);
+
+    return result.attachment;
+  }
+
+  async function consumeOnceContextIfNeeded(contextWasAttached: boolean): Promise<void> {
+    if (!contextWasAttached || contextMode === 'chat_only') {
+      return;
+    }
+
+    if (contextMode === 'dom') {
+      await clearDomSelectionMode({ silent: true });
+      await stopDomSelectionMode('chat_only');
+    } else {
+      setContextMode('chat_only');
+    }
+    setStatusReason('ページ参照を1回送信し、参照モードをオフにしました。');
+  }
+
   async function sendMessage(): Promise<void> {
     await sendPayload(input, pendingAttachments);
   }
@@ -408,8 +566,22 @@ export function App(): JSX.Element {
   }
 
   async function sendPayload(text: string, attachments: Attachment[]): Promise<void> {
-    if (!currentThreadId || status !== 'connected' || (!text.trim() && attachments.length === 0)) {
+    if (!currentThreadId || status !== 'connected' || (!text.trim() && attachments.length === 0 && !contextArmed)) {
       return;
+    }
+
+    const contextWillBeAttached = contextMode === 'dom';
+    const queuedAttachments = [...attachments];
+    if (contextWillBeAttached) {
+      try {
+        const contextAttachment = await createContextAttachment();
+        if (contextAttachment) {
+          queuedAttachments.push(contextAttachment);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatusReason(`ページコンテキスト取得に失敗: ${message}`);
+      }
     }
 
     setInput('');
@@ -421,7 +593,7 @@ export function App(): JSX.Element {
         payload: {
           threadId: currentThreadId,
           text,
-          attachments
+          attachments: queuedAttachments
         }
       });
 
@@ -432,7 +604,10 @@ export function App(): JSX.Element {
 
       setMessagesByThread((prev) => ({ ...prev, [currentThreadId]: res.messages }));
       await loadThreadsAndMaybeMessages();
-      setStatusReason('');
+      await consumeOnceContextIfNeeded(contextWillBeAttached);
+      if (!contextWillBeAttached) {
+        setStatusReason('');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatusReason(`送信に失敗: ${message}`);
@@ -556,6 +731,7 @@ export function App(): JSX.Element {
                     {pendingAttachments.map((item, index) => (
                       <div key={`${item.capturedAt}-${index}`} className="pending-attachment-item">
                         <div>
+                          <small>{attachmentSummary(item)}</small>
                           <small>{item.url}</small>
                           <span>{item.text}</span>
                         </div>
@@ -569,6 +745,35 @@ export function App(): JSX.Element {
               ) : null}
 
               <div className="composer">
+                <div className="context-controls" role="group" aria-label="参照コンテキスト">
+                  <button
+                    type="button"
+                    className={`context-chip ${contextMode === 'chat_only' ? 'active' : ''}`}
+                    onClick={() => void changeContextMode('chat_only')}
+                    disabled={!isConnected}
+                  >
+                    チャットのみ
+                  </button>
+                  <button
+                    type="button"
+                    className={`context-chip ${contextMode === 'dom' ? 'active' : ''}`}
+                    onClick={() => void changeContextMode('dom')}
+                    disabled={!isConnected}
+                  >
+                    DOM範囲
+                  </button>
+                  {contextMode === 'dom' ? (
+                    <>
+                      <span className={`dom-mode-state ${domSelectionActive ? 'active' : 'inactive'}`}>
+                        {domSelectionActive ? '選択中' : '待機中'}: {domSelectionCount}件
+                      </span>
+                      <button type="button" onClick={() => void clearDomSelectionMode()} disabled={!isConnected}>
+                        DOM全解除
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+
                 <textarea
                   placeholder={composerPlaceholder}
                   value={input}
@@ -589,7 +794,7 @@ export function App(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => void sendAttachmentsOnly()}
-                      disabled={composerDisabled || pendingAttachments.length === 0}
+                      disabled={composerDisabled || (pendingAttachments.length === 0 && !contextArmed)}
                     >
                       添付のみ送信
                     </button>
@@ -597,7 +802,7 @@ export function App(): JSX.Element {
                       type="button"
                       onClick={() => void sendMessage()}
                       className="primary-button"
-                      disabled={composerDisabled || (!input.trim() && pendingAttachments.length === 0)}
+                      disabled={composerDisabled || !hasAnyContentForSend}
                     >
                       送信
                     </button>

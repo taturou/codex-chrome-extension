@@ -581,10 +581,14 @@ function buildInputText(text: string, attachments: Attachment[]): string {
   }
 
   for (const attachment of attachments) {
-    if (attachment.type !== 'selected_text') {
+    if (attachment.type === 'selected_text') {
+      parts.push(`選択テキスト\n${attachment.text}`);
       continue;
     }
-    parts.push(`選択テキスト\n${attachment.text}`);
+    if (attachment.type === 'page_context') {
+      const scope = attachment.scope === 'dom_selection' ? 'DOM範囲' : '可視領域';
+      parts.push(`ページ参照 (${scope})\n${attachment.text}`);
+    }
   }
 
   return parts.join('\n\n');

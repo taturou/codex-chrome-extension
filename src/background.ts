@@ -316,6 +316,493 @@ async function attachSelection(tabId?: number): Promise<Attachment> {
   };
 }
 
+interface DomSelectionState {
+  active: boolean;
+  selectedCount: number;
+}
+
+interface PageContextCapture {
+  source: 'viewport' | 'dom_selection';
+  text: string;
+  html: string;
+  url: string;
+  title: string;
+  selectedCount: number;
+}
+
+async function runDomSelectionCommand(
+  tabId: number,
+  action: 'start' | 'stop' | 'clear' | 'state' | 'capture',
+  maxChars = 12000,
+  source: 'viewport' | 'dom_or_viewport' = 'dom_or_viewport'
+): Promise<DomSelectionState | PageContextCapture> {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: ({ nextAction, nextMaxChars, nextSource }) => {
+      type SelectionState = {
+        active: boolean;
+        selectedIds: string[];
+        seq: number;
+        listenersAttached: boolean;
+      };
+
+      type HostWindow = Window & typeof globalThis & { __codexDomSelectionState?: SelectionState };
+
+      const host = window as HostWindow;
+      const styleId = 'codex-dom-selection-style';
+      const panelId = 'codex-dom-selection-panel';
+      const selectedAttr = 'data-codex-dom-selected-id';
+      const selectedClass = 'codex-dom-selected';
+      const hoverClass = 'codex-dom-hover';
+
+      const defaultState: SelectionState = {
+        active: false,
+        selectedIds: [],
+        seq: 0,
+        listenersAttached: false
+      };
+
+      if (!host.__codexDomSelectionState) {
+        host.__codexDomSelectionState = { ...defaultState };
+      }
+      const state = host.__codexDomSelectionState;
+
+      function getElementBySelectionId(id: string): Element | null {
+        return document.querySelector(`[${selectedAttr}="${CSS.escape(id)}"]`);
+      }
+
+      function removeHover(): void {
+        const hoverElements = document.querySelectorAll(`.${hoverClass}`);
+        for (const hoverElement of hoverElements) {
+          hoverElement.classList.remove(hoverClass);
+        }
+      }
+
+      function ensureStyle(): void {
+        if (document.getElementById(styleId)) {
+          return;
+        }
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          .${hoverClass} {
+            outline: 1px solid #60a5fa !important;
+            outline-offset: 2px !important;
+          }
+          .${selectedClass} {
+            outline: 2px solid #2563eb !important;
+            outline-offset: 2px !important;
+            background-color: rgba(37, 99, 235, 0.08) !important;
+          }
+          #${panelId} {
+            position: fixed;
+            right: 12px;
+            top: 12px;
+            z-index: 2147483647;
+            font-family: 'Noto Sans JP', sans-serif;
+            font-size: 12px;
+            background: rgba(15, 23, 42, 0.92);
+            color: #e2e8f0;
+            border-radius: 999px;
+            padding: 6px 10px;
+            display: none;
+            gap: 8px;
+            align-items: center;
+          }
+          #${panelId}[data-active="true"] {
+            display: inline-flex;
+          }
+          #${panelId} button {
+            border: 0;
+            border-radius: 999px;
+            background: #1d4ed8;
+            color: #fff;
+            padding: 2px 8px;
+            font-size: 11px;
+            cursor: pointer;
+          }
+          #${panelId} button[data-kind="clear"] {
+            background: #475569;
+          }
+        `;
+        document.documentElement.appendChild(style);
+      }
+
+      function ensurePanel(): HTMLDivElement {
+        const existing = document.getElementById(panelId);
+        if (existing && existing instanceof HTMLDivElement) {
+          return existing;
+        }
+        const panel = document.createElement('div');
+        panel.id = panelId;
+        panel.innerHTML = `
+          <span data-role="status">DOM選択モード</span>
+          <button type="button" data-kind="clear">全解除</button>
+          <button type="button" data-kind="done">完了</button>
+        `;
+        panel.addEventListener('click', (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+          if (target.dataset.kind === 'clear') {
+            clearSelection();
+            renderPanel();
+            return;
+          }
+          if (target.dataset.kind === 'done') {
+            deactivate();
+            renderPanel();
+          }
+        });
+        document.documentElement.appendChild(panel);
+        return panel;
+      }
+
+      function isSelectableElement(element: Element): boolean {
+        const tag = element.tagName.toLowerCase();
+        if (tag === 'html' || tag === 'body' || tag === 'main') {
+          return false;
+        }
+        return true;
+      }
+
+      function normalizeState(): void {
+        state.selectedIds = state.selectedIds.filter((id) => Boolean(getElementBySelectionId(id)));
+      }
+
+      function renderPanel(): void {
+        const panel = ensurePanel();
+        normalizeState();
+        panel.dataset.active = state.active ? 'true' : 'false';
+        const status = panel.querySelector('[data-role="status"]');
+        if (status) {
+          status.textContent = `DOM選択 ${state.selectedIds.length}件 (Escで終了)`;
+        }
+      }
+
+      function clearSelection(): void {
+        const selectedNodes = document.querySelectorAll(`[${selectedAttr}]`);
+        for (const node of selectedNodes) {
+          if (!(node instanceof HTMLElement)) {
+            continue;
+          }
+          node.classList.remove(selectedClass);
+          node.classList.remove(hoverClass);
+          node.removeAttribute(selectedAttr);
+        }
+        state.selectedIds = [];
+      }
+
+      function toggleSelection(target: Element): void {
+        if (!isSelectableElement(target)) {
+          return;
+        }
+        target.classList.remove(hoverClass);
+        const currentId = target.getAttribute(selectedAttr);
+        if (currentId) {
+          target.removeAttribute(selectedAttr);
+          target.classList.remove(selectedClass);
+          state.selectedIds = state.selectedIds.filter((id) => id !== currentId);
+          return;
+        }
+        state.seq += 1;
+        const id = `codex-${Date.now()}-${state.seq}`;
+        target.setAttribute(selectedAttr, id);
+        target.classList.add(selectedClass);
+        state.selectedIds.push(id);
+      }
+
+      function handleMouseMove(event: MouseEvent): void {
+        if (!state.active) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        if (target.closest(`#${panelId}`)) {
+          return;
+        }
+        const element = target.closest('*');
+        if (!element || !isSelectableElement(element)) {
+          removeHover();
+          return;
+        }
+        const selectedId = element.getAttribute(selectedAttr);
+        if (selectedId) {
+          removeHover();
+          return;
+        }
+        const currentHover = document.querySelector(`.${hoverClass}`);
+        if (currentHover === element) {
+          return;
+        }
+        removeHover();
+        element.classList.add(hoverClass);
+      }
+
+      function handleClick(event: MouseEvent): void {
+        if (!state.active) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        if (target.closest(`#${panelId}`)) {
+          return;
+        }
+        const element = target.closest('*');
+        if (!element) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        toggleSelection(element);
+        renderPanel();
+      }
+
+      function handleKeyDown(event: KeyboardEvent): void {
+        if (!state.active) {
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          deactivate();
+          renderPanel();
+        }
+      }
+
+      function activate(): void {
+        if (state.active) {
+          renderPanel();
+          return;
+        }
+        state.active = true;
+        if (!state.listenersAttached) {
+          document.addEventListener('mousemove', handleMouseMove, true);
+          document.addEventListener('click', handleClick, true);
+          document.addEventListener('keydown', handleKeyDown, true);
+          state.listenersAttached = true;
+        }
+        renderPanel();
+      }
+
+      function deactivate(): void {
+        if (!state.active) {
+          renderPanel();
+          return;
+        }
+        state.active = false;
+        removeHover();
+        renderPanel();
+      }
+
+      function extractViewportText(maxChars: number): string {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        const lines: string[] = [];
+        let total = 0;
+
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (!(node instanceof Text)) {
+            continue;
+          }
+          const raw = node.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+          if (!raw) {
+            continue;
+          }
+          const parent = node.parentElement;
+          if (!parent) {
+            continue;
+          }
+          const tag = parent.tagName.toLowerCase();
+          if (tag === 'script' || tag === 'style' || tag === 'noscript') {
+            continue;
+          }
+          const style = getComputedStyle(parent);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+            continue;
+          }
+          const rect = parent.getBoundingClientRect();
+          const isVisible =
+            rect.width > 0 &&
+            rect.height > 0 &&
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < window.innerHeight &&
+            rect.left < window.innerWidth;
+          if (!isVisible) {
+            continue;
+          }
+          const remaining = maxChars - total;
+          if (remaining <= 0) {
+            break;
+          }
+          const clipped = raw.length > remaining ? raw.slice(0, remaining) : raw;
+          lines.push(clipped);
+          total += clipped.length + 1;
+        }
+        return lines.join('\n');
+      }
+
+      function captureDomSelection(maxChars: number): { text: string; html: string; count: number } {
+        normalizeState();
+        if (state.selectedIds.length === 0) {
+          return { text: '', html: '', count: 0 };
+        }
+
+        const parts: string[] = [];
+        const htmlParts: string[] = [];
+        let total = 0;
+
+        for (const id of state.selectedIds) {
+          const element = getElementBySelectionId(id);
+          if (!element || !(element instanceof HTMLElement)) {
+            continue;
+          }
+          const raw = element.innerText.replace(/\s+/g, ' ').trim();
+          if (!raw) {
+            continue;
+          }
+          const remaining = maxChars - total;
+          if (remaining <= 0) {
+            break;
+          }
+          const clipped = raw.length > remaining ? raw.slice(0, remaining) : raw;
+          parts.push(clipped);
+          htmlParts.push(element.outerHTML);
+          total += clipped.length + 1;
+        }
+
+        return {
+          text: parts.join('\n'),
+          html: htmlParts.join('\n'),
+          count: state.selectedIds.length
+        };
+      }
+
+      ensureStyle();
+      ensurePanel();
+
+      if (nextAction === 'start') {
+        activate();
+        return { active: state.active, selectedCount: state.selectedIds.length };
+      }
+      if (nextAction === 'stop') {
+        deactivate();
+        return { active: state.active, selectedCount: state.selectedIds.length };
+      }
+      if (nextAction === 'clear') {
+        clearSelection();
+        renderPanel();
+        return { active: state.active, selectedCount: state.selectedIds.length };
+      }
+      if (nextAction === 'state') {
+        renderPanel();
+        return { active: state.active, selectedCount: state.selectedIds.length };
+      }
+
+      const selected = captureDomSelection(nextMaxChars);
+      const canUseDom = selected.count > 0 && selected.text;
+      if (nextSource === 'dom_or_viewport' && canUseDom) {
+        return {
+          source: 'dom_selection',
+          text: selected.text,
+          html: selected.html,
+          url: window.location.href,
+          title: document.title,
+          selectedCount: selected.count
+        };
+      }
+
+      return {
+        source: 'viewport',
+        text: extractViewportText(nextMaxChars),
+        html: '',
+        url: window.location.href,
+        title: document.title,
+        selectedCount: selected.count
+      };
+    },
+    args: [{ nextAction: action, nextMaxChars: maxChars, nextSource: source }]
+  });
+
+  return results[0]?.result as DomSelectionState | PageContextCapture;
+}
+
+async function startDomSelectionMode(tabId?: number): Promise<DomSelectionState> {
+  const tab = await getActiveTab(tabId);
+  if (typeof tab.id !== 'number') {
+    throw new Error('tabId が不正です');
+  }
+  await ensureTabHostPermission(tab);
+  return (await runDomSelectionCommand(tab.id, 'start')) as DomSelectionState;
+}
+
+async function stopDomSelectionMode(tabId?: number): Promise<DomSelectionState> {
+  const tab = await getActiveTab(tabId);
+  if (typeof tab.id !== 'number') {
+    throw new Error('tabId が不正です');
+  }
+  await ensureTabHostPermission(tab);
+  return (await runDomSelectionCommand(tab.id, 'stop')) as DomSelectionState;
+}
+
+async function clearDomSelection(tabId?: number): Promise<DomSelectionState> {
+  const tab = await getActiveTab(tabId);
+  if (typeof tab.id !== 'number') {
+    throw new Error('tabId が不正です');
+  }
+  await ensureTabHostPermission(tab);
+  return (await runDomSelectionCommand(tab.id, 'clear')) as DomSelectionState;
+}
+
+async function getDomSelectionState(tabId?: number): Promise<DomSelectionState> {
+  const tab = await getActiveTab(tabId);
+  if (typeof tab.id !== 'number') {
+    throw new Error('tabId が不正です');
+  }
+  await ensureTabHostPermission(tab);
+  return (await runDomSelectionCommand(tab.id, 'state')) as DomSelectionState;
+}
+
+async function capturePageContext(
+  tabId: number | undefined,
+  source: 'viewport' | 'dom_or_viewport',
+  maxChars = 12000
+): Promise<{ attachment: Attachment; source: 'viewport' | 'dom_selection' }> {
+  const tab = await getActiveTab(tabId);
+  if (typeof tab.id !== 'number') {
+    throw new Error('tabId が不正です');
+  }
+  await ensureTabHostPermission(tab);
+  const result = (await runDomSelectionCommand(tab.id, 'capture', maxChars, source)) as PageContextCapture;
+  if (!result.text.trim()) {
+    throw new Error('ページコンテキストの取得結果が空です');
+  }
+
+  const markdownText = result.html
+    ? convertSelectionHtmlToMarkdown(result.html, result.text)
+    : result.text;
+
+  return {
+    source: result.source,
+    attachment: {
+      type: 'page_context',
+      scope: result.source,
+      text: markdownText,
+      tabId: tab.id,
+      url: result.url,
+      title: result.title,
+      selectedCount: result.selectedCount,
+      capturedAt: now()
+    }
+  };
+}
+
 async function handleCommand(command: RuntimeCommand): Promise<unknown> {
   switch (command.type) {
     case 'CONNECT_WS': {
@@ -389,6 +876,21 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
       });
       const result: AttachSelectionResult = { attachment };
       return result;
+    }
+    case 'START_DOM_SELECTION_MODE': {
+      return await startDomSelectionMode(command.payload.tabId);
+    }
+    case 'STOP_DOM_SELECTION_MODE': {
+      return await stopDomSelectionMode(command.payload.tabId);
+    }
+    case 'CLEAR_DOM_SELECTION': {
+      return await clearDomSelection(command.payload.tabId);
+    }
+    case 'GET_DOM_SELECTION_STATE': {
+      return await getDomSelectionState(command.payload.tabId);
+    }
+    case 'CAPTURE_PAGE_CONTEXT': {
+      return await capturePageContext(command.payload.tabId, command.payload.source, command.payload.maxChars ?? 12000);
     }
     case 'CREATE_THREAD': {
       const createdAt = now();
@@ -464,6 +966,11 @@ function isRuntimeCommand(message: unknown): message is RuntimeCommand {
     'GET_WS_STATUS',
     'SEND_CHAT_MESSAGE',
     'ATTACH_SELECTION',
+    'START_DOM_SELECTION_MODE',
+    'STOP_DOM_SELECTION_MODE',
+    'CLEAR_DOM_SELECTION',
+    'GET_DOM_SELECTION_STATE',
+    'CAPTURE_PAGE_CONTEXT',
     'CREATE_THREAD',
     'RENAME_THREAD',
     'SWITCH_THREAD',

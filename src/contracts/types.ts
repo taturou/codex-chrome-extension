@@ -12,16 +12,28 @@ export interface Setting {
   wsUrl: string;
 }
 
-export interface Attachment {
-  type: 'selected_text';
+interface AttachmentBase {
   text: string;
   tabId: number;
   url: string;
   capturedAt: number;
 }
 
+export interface SelectedTextAttachment extends AttachmentBase {
+  type: 'selected_text';
+}
+
+export interface PageContextAttachment extends AttachmentBase {
+  type: 'page_context';
+  scope: 'viewport' | 'dom_selection';
+  title?: string;
+  selectedCount?: number;
+}
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 export type MessageStatus = 'pending' | 'streaming' | 'done' | 'error';
+
+export type Attachment = SelectedTextAttachment | PageContextAttachment;
 
 export interface Message {
   id: string;

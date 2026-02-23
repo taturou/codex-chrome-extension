@@ -11,6 +11,11 @@ export type RuntimeCommand =
   | RuntimeEnvelope<'GET_WS_STATUS', Record<string, never>>
   | RuntimeEnvelope<'SEND_CHAT_MESSAGE', { threadId: string; text: string; attachments: Attachment[] }>
   | RuntimeEnvelope<'ATTACH_SELECTION', { tabId?: number }>
+  | RuntimeEnvelope<'START_DOM_SELECTION_MODE', { tabId?: number }>
+  | RuntimeEnvelope<'STOP_DOM_SELECTION_MODE', { tabId?: number }>
+  | RuntimeEnvelope<'CLEAR_DOM_SELECTION', { tabId?: number }>
+  | RuntimeEnvelope<'GET_DOM_SELECTION_STATE', { tabId?: number }>
+  | RuntimeEnvelope<'CAPTURE_PAGE_CONTEXT', { tabId?: number; source: 'viewport' | 'dom_or_viewport'; maxChars?: number }>
   | RuntimeEnvelope<'CREATE_THREAD', { title?: string }>
   | RuntimeEnvelope<'RENAME_THREAD', { threadId: string; title: string }>
   | RuntimeEnvelope<'SWITCH_THREAD', { threadId: string }>
@@ -58,4 +63,14 @@ export interface AttachSelectionResult {
 export interface WsStatusResult {
   status: WsStatus;
   reason?: string;
+}
+
+export interface DomSelectionStateResult {
+  active: boolean;
+  selectedCount: number;
+}
+
+export interface CapturePageContextResult {
+  attachment: Attachment;
+  source: 'viewport' | 'dom_selection';
 }
