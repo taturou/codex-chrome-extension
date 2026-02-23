@@ -165,6 +165,7 @@ textarea:focus-visible {
   padding: 10px;
   display: grid;
   gap: 10px;
+  align-self: start;
 }
 
 .connection-gate h2 {
