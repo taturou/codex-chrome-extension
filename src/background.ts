@@ -2,13 +2,14 @@ import type {
   ApiResponse,
   AttachSelectionResult,
   CreateThreadResult,
+  UsageLimitsResult,
   ListThreadsResult,
   MessagesResult,
   RuntimeCommand,
   SettingsResult,
   SidePanelEvent
 } from './contracts/messages';
-import type { Attachment, Message, Thread, WsStatus } from './contracts/types';
+import type { Attachment, Message, Thread, UsageLimits, WsStatus } from './contracts/types';
 import { StorageRepository } from './storage/repository';
 import { DEFAULT_WS_URL } from './shared/constants';
 import { createId } from './shared/id';
@@ -22,6 +23,10 @@ const sidePanelPorts = new Set<chrome.runtime.Port>();
 
 let wsStatus: WsStatus = 'disconnected';
 let wsReason: string | undefined;
+let usageLimits: UsageLimits = {
+  rateLimits: [],
+  updatedAt: 0
+};
 
 function ensureDocumentForTurndown(): void {
   if (typeof document !== 'undefined') {
@@ -56,6 +61,12 @@ function now(): number {
   return Date.now();
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, ms);
+  });
+}
+
 async function broadcast(event: SidePanelEvent): Promise<void> {
   const disconnectedPorts: chrome.runtime.Port[] = [];
 
@@ -83,6 +94,27 @@ async function setStatus(status: WsStatus, reason?: string): Promise<void> {
     type: 'WS_STATUS_CHANGED',
     payload: { status, reason }
   });
+}
+
+async function setUsage(next: UsageLimits): Promise<void> {
+  usageLimits = next;
+  await broadcast({
+    type: 'USAGE_LIMITS_UPDATED',
+    payload: { usage: usageLimits }
+  });
+}
+
+async function refreshUsageLimits(timeoutMs = 1600): Promise<UsageLimits> {
+  const before = usageLimits.updatedAt;
+  transport.requestUsageLimits();
+  const startedAt = now();
+  while (now() - startedAt < timeoutMs) {
+    if (usageLimits.updatedAt > before) {
+      break;
+    }
+    await sleep(80);
+  }
+  return usageLimits;
 }
 
 async function findFallbackAssistantMessageId(threadId: string): Promise<string | undefined> {
@@ -157,6 +189,9 @@ const transport = new WebSocketTransport({
       payload: { entry }
     });
   },
+  onUsage: (usage) => {
+    void setUsage(usage);
+  },
   onToken: ({ threadId, messageId, token }) => {
     void (async () => {
       const { resolvedMessageId, updated } = await appendTokenWithFallback(threadId, messageId, token);
@@ -180,6 +215,13 @@ const transport = new WebSocketTransport({
         type: 'CHAT_DONE',
         payload: { threadId, messageId: resolvedMessageId }
       });
+      if (wsStatus === 'connected') {
+        try {
+          await refreshUsageLimits();
+        } catch {
+          // no-op: usage refresh is best-effort.
+        }
+      }
     })();
   },
   onError: ({ threadId, messageId, error }) => {
@@ -199,6 +241,13 @@ const transport = new WebSocketTransport({
         type: 'CHAT_ERROR',
         payload: { threadId, messageId: resolvedMessageId, error }
       });
+      if (wsStatus === 'connected') {
+        try {
+          await refreshUsageLimits();
+        } catch {
+          // no-op: usage refresh is best-effort.
+        }
+      }
     })();
   }
 });
@@ -818,6 +867,15 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
     case 'GET_WS_STATUS': {
       return { status: wsStatus, reason: wsReason };
     }
+    case 'GET_USAGE_LIMITS': {
+      const result: UsageLimitsResult = { usage: usageLimits };
+      return result;
+    }
+    case 'REFRESH_USAGE_LIMITS': {
+      const usage = await refreshUsageLimits();
+      const result: UsageLimitsResult = { usage };
+      return result;
+    }
     case 'SEND_CHAT_MESSAGE': {
       const thread = await ensureThread(command.payload.threadId);
       const userMessage: Message = {
@@ -964,6 +1022,8 @@ function isRuntimeCommand(message: unknown): message is RuntimeCommand {
     'CONNECT_WS',
     'DISCONNECT_WS',
     'GET_WS_STATUS',
+    'GET_USAGE_LIMITS',
+    'REFRESH_USAGE_LIMITS',
     'SEND_CHAT_MESSAGE',
     'ATTACH_SELECTION',
     'START_DOM_SELECTION_MODE',
@@ -996,6 +1056,10 @@ chrome.runtime.onConnect.addListener((port) => {
     port.postMessage({
       type: 'WS_STATUS_CHANGED',
       payload: { status: wsStatus, reason: wsReason }
+    } satisfies SidePanelEvent);
+    port.postMessage({
+      type: 'USAGE_LIMITS_UPDATED',
+      payload: { usage: usageLimits }
     } satisfies SidePanelEvent);
   } catch {
     sidePanelPorts.delete(port);

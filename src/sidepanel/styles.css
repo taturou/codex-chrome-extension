@@ -33,8 +33,44 @@ body {
   gap: 8px;
 }
 
+.usage-bars {
+  display: grid;
+  gap: 4px;
+  width: min(300px, 44vw);
+  min-width: 170px;
+}
+
+.usage-row {
+  display: grid;
+  grid-template-columns: minmax(62px, auto) 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-row small {
+  font-size: 11px;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.usage-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: #dbe4ef;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+}
+
+.usage-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #16a34a, #4ade80);
+  transition: width 180ms ease-out;
+}
+
 .header-actions {
   display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 6px;
 }
 

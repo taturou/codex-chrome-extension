@@ -1,4 +1,4 @@
-import type { Attachment, WsDebugLogEntry, WsStatus } from '../contracts/types';
+import type { Attachment, RateLimitItem, UsageLimits, WsDebugLogEntry, WsStatus } from '../contracts/types';
 import { computeBackoffMs } from '../shared/backoff';
 
 interface ChatSendPayload {
@@ -11,6 +11,7 @@ interface ChatSendPayload {
 interface TransportEvents {
   onStatus: (status: WsStatus, reason?: string) => void;
   onDebug: (entry: WsDebugLogEntry) => void;
+  onUsage: (usage: UsageLimits) => void;
   onToken: (event: { threadId: string; messageId?: string; token: string }) => void;
   onDone: (event: { threadId: string; messageId?: string }) => void;
   onError: (event: { threadId?: string; messageId?: string; error: string }) => void;
@@ -36,9 +37,23 @@ type PendingRequest =
       attachments: Attachment[];
       retryCount: number;
     }
+  | {
+      kind: 'usage/fetch';
+      methodIndex: number;
+      method: string;
+      retryCount: number;
+    };
 
 const QUEUE_OVERFLOW_CODE = -32001;
 const MAX_QUEUE_RETRIES = 3;
+const USAGE_SEARCH_DEPTH = 5;
+const USAGE_METHOD_CANDIDATES = [
+  'account/rateLimits/read',
+  'account/rate_limits/read',
+  'usage/get',
+  'limits/get',
+  'rate_limits/get'
+];
 
 function extractString(input: unknown): string | undefined {
   return typeof input === 'string' ? input : undefined;
@@ -53,6 +68,19 @@ function extractRecord(input: unknown): Record<string, unknown> | undefined {
 
 function extractNumber(input: unknown): number | undefined {
   return typeof input === 'number' ? input : undefined;
+}
+
+function normalizeNumber(input: unknown): number | undefined {
+  if (typeof input === 'number' && Number.isFinite(input)) {
+    return input;
+  }
+  if (typeof input === 'string' && input.trim()) {
+    const parsed = Number(input);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
 }
 
 function pickString(
@@ -73,10 +101,205 @@ function pickString(
   return undefined;
 }
 
+function pickNumber(source: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const found = normalizeNumber(source[key]);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function normalizeRateLimitItem(input: unknown): RateLimitItem | undefined {
+  const source = extractRecord(input);
+  if (!source) {
+    return undefined;
+  }
+  const limitId =
+    pickString([source], ['limitId', 'limit_id', 'id', 'name']) ??
+    (typeof pickNumber(source, ['windowDurationMins', 'window_duration_mins']) === 'number'
+      ? `window_${pickNumber(source, ['windowDurationMins', 'window_duration_mins'])}m`
+      : undefined);
+  if (!limitId) {
+    return undefined;
+  }
+  let usedPercent = pickNumber(source, ['usedPercent', 'used_percent', 'percent', 'percentage', 'ratio']);
+  if (typeof usedPercent === 'number' && usedPercent <= 1) {
+    usedPercent *= 100;
+  }
+  const windowDurationMins = pickNumber(source, ['windowDurationMins', 'window_duration_mins', 'windowMinutes']);
+  const resetsAt = pickString([source], ['resetsAt', 'resets_at', 'resetAt', 'reset_at']);
+  return {
+    limitId,
+    ...(usedPercent !== undefined ? { usedPercent } : {}),
+    ...(windowDurationMins !== undefined ? { windowDurationMins } : {}),
+    ...(resetsAt ? { resetsAt } : {})
+  };
+}
+
+function normalizeRateLimitComposite(input: unknown): RateLimitItem[] {
+  const source = extractRecord(input);
+  if (!source) {
+    return [];
+  }
+  const baseId = pickString([source], ['limitId', 'limit_id', 'id', 'name']) ?? 'codex';
+  const primary = extractRecord(source.primary);
+  const secondary = extractRecord(source.secondary);
+  const items: RateLimitItem[] = [];
+
+  if (primary) {
+    let usedPercent = pickNumber(primary, ['usedPercent', 'used_percent', 'percent', 'percentage', 'ratio']);
+    if (typeof usedPercent === 'number' && usedPercent <= 1) {
+      usedPercent *= 100;
+    }
+    const windowDurationMins = pickNumber(primary, ['windowDurationMins', 'window_duration_mins', 'windowMinutes']);
+    const resetsAtNum = pickNumber(primary, ['resetsAt', 'resets_at', 'resetAt', 'reset_at']);
+    const resetsAtStr = pickString([primary], ['resetsAt', 'resets_at', 'resetAt', 'reset_at']);
+    items.push({
+      limitId: `${baseId}_primary`,
+      ...(usedPercent !== undefined ? { usedPercent } : {}),
+      ...(windowDurationMins !== undefined ? { windowDurationMins } : {}),
+      ...(resetsAtStr ? { resetsAt: resetsAtStr } : {}),
+      ...(!resetsAtStr && resetsAtNum !== undefined ? { resetsAt: String(resetsAtNum) } : {})
+    });
+  }
+
+  if (secondary) {
+    let usedPercent = pickNumber(secondary, ['usedPercent', 'used_percent', 'percent', 'percentage', 'ratio']);
+    if (typeof usedPercent === 'number' && usedPercent <= 1) {
+      usedPercent *= 100;
+    }
+    const windowDurationMins = pickNumber(secondary, ['windowDurationMins', 'window_duration_mins', 'windowMinutes']);
+    const resetsAtNum = pickNumber(secondary, ['resetsAt', 'resets_at', 'resetAt', 'reset_at']);
+    const resetsAtStr = pickString([secondary], ['resetsAt', 'resets_at', 'resetAt', 'reset_at']);
+    items.push({
+      limitId: `${baseId}_secondary`,
+      ...(usedPercent !== undefined ? { usedPercent } : {}),
+      ...(windowDurationMins !== undefined ? { windowDurationMins } : {}),
+      ...(resetsAtStr ? { resetsAt: resetsAtStr } : {}),
+      ...(!resetsAtStr && resetsAtNum !== undefined ? { resetsAt: String(resetsAtNum) } : {})
+    });
+  }
+
+  return items;
+}
+
+function collectRateLimits(source: Record<string, unknown>): RateLimitItem[] {
+  const candidates = ['rateLimits', 'rate_limits', 'limits'];
+  const items: RateLimitItem[] = [];
+  for (const key of candidates) {
+    const raw = source[key];
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        const normalized = normalizeRateLimitItem(entry);
+        if (normalized) {
+          items.push(normalized);
+        }
+      }
+      continue;
+    }
+    const composite = normalizeRateLimitComposite(raw);
+    if (composite.length > 0) {
+      items.push(...composite);
+      continue;
+    }
+    const single = normalizeRateLimitItem(raw);
+    if (single) {
+      items.push(single);
+    }
+  }
+
+  const byLimitId = extractRecord(source.rateLimitsByLimitId) ?? extractRecord(source.rate_limits_by_limit_id);
+  if (byLimitId) {
+    for (const value of Object.values(byLimitId)) {
+      const composite = normalizeRateLimitComposite(value);
+      if (composite.length > 0) {
+        items.push(...composite);
+        continue;
+      }
+      const item = normalizeRateLimitItem(value);
+      if (item) {
+        items.push(item);
+      }
+    }
+  }
+  const singular = normalizeRateLimitItem(source.rateLimit) ?? normalizeRateLimitItem(source.rate_limit);
+  if (singular) {
+    items.push(singular);
+  }
+  const deduped = new Map<string, RateLimitItem>();
+  for (const item of items) {
+    deduped.set(item.limitId, item);
+  }
+  return Array.from(deduped.values());
+}
+
+function normalizeUsageLimits(source: Record<string, unknown>): UsageLimits | undefined {
+  const rateLimits = collectRateLimits(source);
+  if (rateLimits.length === 0) {
+    return undefined;
+  }
+
+  return {
+    rateLimits,
+    updatedAt: Date.now()
+  };
+}
+
+function summarizeUsageKeys(data: Record<string, unknown>): string {
+  const method = pickString([data], ['method']) ?? '(none)';
+  const top = Object.keys(data).slice(0, 20).join(',');
+  const result = extractRecord(data.result);
+  const params = extractRecord(data.params);
+  const payload = extractRecord(data.payload);
+  const resultKeys = result ? Object.keys(result).slice(0, 20).join(',') : '(none)';
+  const paramsKeys = params ? Object.keys(params).slice(0, 20).join(',') : '(none)';
+  const payloadKeys = payload ? Object.keys(payload).slice(0, 20).join(',') : '(none)';
+  return `method=${method} top=[${top}] result=[${resultKeys}] params=[${paramsKeys}] payload=[${payloadKeys}]`;
+}
+
+function extractUsageLimits(data: Record<string, unknown>, depth = 0): UsageLimits | undefined {
+  if (depth > USAGE_SEARCH_DEPTH) {
+    return undefined;
+  }
+
+  const direct = normalizeUsageLimits(data);
+  if (direct) {
+    return direct;
+  }
+
+  const keys = ['usage', 'limits', 'rateLimits', 'rate_limits', 'quota', 'result', 'params', 'payload', 'msg'];
+  for (const key of keys) {
+    const nested = extractRecord(data[key]);
+    if (!nested) {
+      continue;
+    }
+    const found = extractUsageLimits(nested, depth + 1);
+    if (found) {
+      return found;
+    }
+  }
+
+  for (const value of Object.values(data)) {
+    const nested = extractRecord(value);
+    if (!nested) {
+      continue;
+    }
+    const found = extractUsageLimits(nested, depth + 1);
+    if (found) {
+      return found;
+    }
+  }
+
+  return undefined;
+}
+
 function parseIncoming(raw: string):
   | { kind: 'token'; threadId?: string; messageId?: string; token: string; sourceMethod?: string }
   | { kind: 'done'; threadId?: string; messageId?: string }
   | { kind: 'error'; threadId?: string; messageId?: string; error: string }
+  | { kind: 'usage'; usage: UsageLimits }
   | { kind: 'unknown' } {
   try {
     const data = extractRecord(JSON.parse(raw));
@@ -98,6 +321,10 @@ function parseIncoming(raw: string):
     const threadId = pickString([data, params, msg], ['threadId', 'thread_id', 'conversationId', 'conversation_id']);
     const messageId = pickString([data, params, msg], ['messageId', 'message_id', 'itemId', 'item_id']);
     const token = pickString([data, params, payload, msg], ['token', 'delta']) ?? '';
+    const usage = extractUsageLimits(data);
+    if (usage) {
+      return { kind: 'usage', usage };
+    }
 
     const isTokenEvent =
       method === 'item/agentMessage/delta' ||
@@ -183,7 +410,9 @@ export class WebSocketTransport {
       this.debug('recv', 'socket message', truncate(raw, 1200));
       this.handleRpcResponse(raw);
       const parsed = parseIncoming(raw);
-      if (parsed.kind === 'token') {
+      if (parsed.kind === 'usage') {
+        this.events.onUsage(parsed.usage);
+      } else if (parsed.kind === 'token') {
         if (parsed.sourceMethod === 'codex/event/agent_message_delta') {
           return;
         }
@@ -313,6 +542,16 @@ export class WebSocketTransport {
     this.sendThreadStart(payload.threadId, payload.messageId, payload.text, payload.attachments);
   }
 
+  requestUsageLimits(): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not connected');
+    }
+    if (this.initState !== 'ready') {
+      throw new Error('WebSocket is not initialized');
+    }
+    this.sendUsageFetch(0);
+  }
+
   private scheduleReconnect(): void {
     this.clearReconnectTimer();
     const delay = computeBackoffMs(this.reconnectAttempts);
@@ -408,6 +647,20 @@ export class WebSocketTransport {
     });
   }
 
+  private sendUsageFetch(methodIndex: number): void {
+    if (methodIndex >= USAGE_METHOD_CANDIDATES.length) {
+      return;
+    }
+    const method = USAGE_METHOD_CANDIDATES[methodIndex];
+    const id = this.sendRpcRequest(method, {});
+    this.pendingRequests.set(id, {
+      kind: 'usage/fetch',
+      methodIndex,
+      method,
+      retryCount: 0
+    });
+  }
+
   private sendRpcRequest(method: string, params?: Record<string, unknown>): string {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket is not connected');
@@ -449,6 +702,11 @@ export class WebSocketTransport {
       return;
     }
 
+    const usage = extractUsageLimits(data);
+    if (usage) {
+      this.events.onUsage(usage);
+    }
+
     const id = extractString(data.id);
     const result = extractRecord(data.result);
     const error = extractRecord(data.error);
@@ -479,6 +737,16 @@ export class WebSocketTransport {
     if (error) {
       const message = extractString(error.message) ?? 'unknown error';
       const code = extractNumber(error.code);
+      if (pending.kind === 'usage/fetch') {
+        const methodNotFound = code === -32601 || message.toLowerCase().includes('method') && message.toLowerCase().includes('not found');
+        if (methodNotFound) {
+          this.debug('state', 'usage fetch method not found', pending.method);
+          this.sendUsageFetch(pending.methodIndex + 1);
+          return;
+        }
+        this.debug('error', `rpc error (${pending.kind})`, message);
+        return;
+      }
       if (code === QUEUE_OVERFLOW_CODE && pending.retryCount < MAX_QUEUE_RETRIES) {
         this.scheduleRetry({
           ...pending,
@@ -492,6 +760,13 @@ export class WebSocketTransport {
         messageId: pending.localMessageId,
         error: message
       });
+      return;
+    }
+
+    if (pending.kind === 'usage/fetch') {
+      if (!usage) {
+        this.debug('error', 'usage payload parse miss', `${pending.method} ${summarizeUsageKeys(data)}`);
+      }
       return;
     }
 
@@ -521,6 +796,9 @@ export class WebSocketTransport {
   }
 
   private scheduleRetry(pending: PendingRequest): void {
+    if (pending.kind === 'usage/fetch') {
+      return;
+    }
     const delay = computeBackoffMs(pending.retryCount, 500, 5000);
     this.debug('state', 'rpc retry scheduled', `${pending.kind} retry=${pending.retryCount} delay=${delay}ms`);
     const timer = globalThis.setTimeout(() => {

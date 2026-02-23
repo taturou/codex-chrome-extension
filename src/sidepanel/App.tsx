@@ -8,9 +8,10 @@ import type {
   MessagesResult,
   SettingsResult,
   SidePanelEvent,
+  UsageLimitsResult,
   WsStatusResult
 } from '../contracts/messages';
-import type { Attachment, Message, Thread, WsDebugLogEntry, WsStatus } from '../contracts/types';
+import type { Attachment, Message, RateLimitItem, Thread, UsageLimits, WsDebugLogEntry, WsStatus } from '../contracts/types';
 import { SafeMarkdown } from '../shared/markdown';
 import { sendCommand, listenEvents } from '../shared/runtime';
 
@@ -35,6 +36,64 @@ const STREAM_STALE_WARN_MS = 12_000;
 
 function StatusBadge({ status }: { status: WsStatus }): JSX.Element {
   return <span className={`status status-${status}`}>{status}</span>;
+}
+
+function rateLimitPercent(item: RateLimitItem): number {
+  if (typeof item.usedPercent !== 'number' || !Number.isFinite(item.usedPercent)) {
+    return 0;
+  }
+  if (item.usedPercent <= 1) {
+    return Math.max(0, Math.min(100, item.usedPercent * 100));
+  }
+  return Math.max(0, Math.min(100, item.usedPercent));
+}
+
+function rateLimitMeta(item: RateLimitItem): string {
+  const p = rateLimitPercent(item);
+  const win = typeof item.windowDurationMins === 'number' ? `${item.windowDurationMins}m` : '';
+  if (win) {
+    return `${Math.round(p)}% / ${win}`;
+  }
+  return `${Math.round(p)}%`;
+}
+
+function rateLimitLabel(limitId: string): string {
+  return limitId.replace(/_/g, ' ');
+}
+
+function UsageLimitBars({ usage }: { usage: UsageLimits }): JSX.Element {
+  const limits = usage.rateLimits;
+
+  if (limits.length === 0) {
+    return (
+      <div className="usage-bars" aria-label="Codex usage limit">
+        <div className="usage-row">
+          <small>limits</small>
+          <div className="usage-track">
+            <div className="usage-fill" style={{ width: '0%' }} />
+          </div>
+          <small>N/A</small>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="usage-bars" aria-label="Codex usage limit">
+      {limits.slice(0, 2).map((item) => {
+        const percent = rateLimitPercent(item);
+        return (
+          <div key={item.limitId} className="usage-row">
+            <small title={item.limitId}>{rateLimitLabel(item.limitId)}</small>
+            <div className="usage-track" role="img" aria-label={`${item.limitId} ${Math.round(percent)} percent`}>
+              <div className="usage-fill" style={{ width: `${percent}%` }} />
+            </div>
+            <small>{rateLimitMeta(item)}</small>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function formatElapsed(ms: number): string {
@@ -356,6 +415,10 @@ export function App(): JSX.Element {
   const [tokenTimestampByMessage, setTokenTimestampByMessage] = useState<TokenTimestampByMessage>({});
   const [messageErrors, setMessageErrors] = useState<MessageErrors>({});
   const [nowTs, setNowTs] = useState(() => Date.now());
+  const [usageLimits, setUsageLimits] = useState<UsageLimits>({
+    rateLimits: [],
+    updatedAt: 0
+  });
 
   const currentMessages = useMemo(() => {
     if (!currentThreadId) {
@@ -439,6 +502,30 @@ export function App(): JSX.Element {
     setStatusReason(res.reason ?? '');
   }
 
+  async function loadUsageLimits(): Promise<void> {
+    const res = await sendCommand<UsageLimitsResult>({ type: 'GET_USAGE_LIMITS', payload: {} });
+    setUsageLimits(res.usage);
+  }
+
+  async function refreshUsageLimits(): Promise<void> {
+    const res = await sendCommand<UsageLimitsResult>({ type: 'REFRESH_USAGE_LIMITS', payload: {} });
+    setUsageLimits(res.usage);
+  }
+
+  async function refreshUsageLimitsWithRetry(): Promise<void> {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        await refreshUsageLimits();
+        return;
+      } catch {
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, 180);
+        });
+      }
+    }
+    await loadUsageLimits();
+  }
+
   function applySidePanelEvent(event: SidePanelEvent): void {
     if (event.type === 'WS_STATUS_CHANGED') {
       setStatus(event.payload.status);
@@ -454,6 +541,11 @@ export function App(): JSX.Element {
         }
         return next;
       });
+      return;
+    }
+
+    if (event.type === 'USAGE_LIMITS_UPDATED') {
+      setUsageLimits(event.payload.usage);
       return;
     }
 
@@ -517,6 +609,7 @@ export function App(): JSX.Element {
     void loadThreadsAndMaybeMessages();
     void loadSettings();
     void loadWsStatus();
+    void loadUsageLimits();
     const unlisten = listenEvents(applySidePanelEvent);
     const intervalId = globalThis.setInterval(() => {
       void loadWsStatus();
@@ -782,6 +875,7 @@ export function App(): JSX.Element {
     try {
       await sendCommand({ type: 'CONNECT_WS', payload: { url: wsUrl } });
       await loadWsStatus();
+      await refreshUsageLimitsWithRetry();
       setStatusReason('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -839,6 +933,7 @@ export function App(): JSX.Element {
           <StatusBadge status={status} />
         </div>
         <div className="header-actions">
+          <UsageLimitBars usage={usageLimits} />
           {isConnected ? (
             <button type="button" onClick={() => void disconnectWs()}>
               切断

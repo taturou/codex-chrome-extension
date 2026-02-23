@@ -8,6 +8,18 @@ export interface WsDebugLogEntry {
   detail?: string;
 }
 
+export interface RateLimitItem {
+  limitId: string;
+  usedPercent?: number;
+  windowDurationMins?: number;
+  resetsAt?: string;
+}
+
+export interface UsageLimits {
+  rateLimits: RateLimitItem[];
+  updatedAt: number;
+}
+
 export interface Setting {
   wsUrl: string;
 }
