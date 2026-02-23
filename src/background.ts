@@ -14,12 +14,43 @@ import { DEFAULT_WS_URL } from './shared/constants';
 import { createId } from './shared/id';
 import { SIDEPANEL_EVENT_PORT_NAME } from './shared/runtimePorts';
 import { WebSocketTransport } from './transport/wsTransport';
+import TurndownService from 'turndown';
+import { createDocument } from '@mixmark-io/domino';
 
 const repository = new StorageRepository();
 const sidePanelPorts = new Set<chrome.runtime.Port>();
 
 let wsStatus: WsStatus = 'disconnected';
 let wsReason: string | undefined;
+
+function ensureDocumentForTurndown(): void {
+  if (typeof document !== 'undefined') {
+    return;
+  }
+  (globalThis as typeof globalThis & { document?: Document }).document = createDocument('') as unknown as Document;
+}
+
+ensureDocumentForTurndown();
+
+const markdownConverter = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+  emDelimiter: '*',
+  strongDelimiter: '**',
+  linkStyle: 'inlined'
+});
+
+function convertSelectionHtmlToMarkdown(html: string, fallbackText: string): string {
+  const doc = createDocument('<div id="turndown-root"></div>');
+  const root = doc.getElementById('turndown-root');
+  if (!root) {
+    return fallbackText;
+  }
+  root.innerHTML = html;
+  const markdown = markdownConverter.turndown(root).trim();
+  return markdown || fallbackText;
+}
 
 function now(): number {
   return Date.now();
@@ -249,22 +280,40 @@ async function attachSelection(tabId?: number): Promise<Attachment> {
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => {
-      const selected = window.getSelection()?.toString() ?? '';
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.toString().trim() === '') {
+        return {
+          html: '',
+          text: '',
+          url: window.location.href
+        };
+      }
+
+      const root = document.createElement('div');
+      for (let i = 0; i < selection.rangeCount; i += 1) {
+        const range = selection.getRangeAt(i);
+        root.appendChild(range.cloneContents());
+        if (i < selection.rangeCount - 1) {
+          root.appendChild(document.createElement('br'));
+        }
+      }
+
       return {
-        text: selected.trim(),
+        html: root.innerHTML,
+        text: selection.toString().trim(),
         url: window.location.href
       };
     }
   });
 
-  const first = results[0]?.result as { text: string; url: string } | undefined;
+  const first = results[0]?.result as { html: string; text: string; url: string } | undefined;
   if (!first || !first.text) {
     throw new Error('選択テキストが空です');
   }
 
   return {
     type: 'selected_text',
-    text: first.text,
+    text: convertSelectionHtmlToMarkdown(first.html, first.text),
     tabId: tab.id,
     url: first.url,
     capturedAt: now()

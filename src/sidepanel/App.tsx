@@ -47,6 +47,21 @@ function ThreadList(props: {
 }
 
 function MessageList({ messages }: { messages: Message[] }): JSX.Element {
+  function toDisplayMarkdown(message: Message): string {
+    const body = message.contentMd.trim();
+    const attachments = (message.attachments ?? [])
+      .map((item, index) => `### 添付 ${index + 1}\n\n${item.text}`)
+      .join('\n\n');
+
+    if (!attachments) {
+      return body;
+    }
+    if (!body) {
+      return attachments;
+    }
+    return `${body}\n\n---\n\n${attachments}`;
+  }
+
   return (
     <div className="messages">
       {messages.map((message) => (
@@ -55,13 +70,8 @@ function MessageList({ messages }: { messages: Message[] }): JSX.Element {
             <strong>{message.role}</strong> / {message.status}
           </header>
           <div className="message-content">
-            <SafeMarkdown markdown={message.contentMd} />
+            <SafeMarkdown markdown={toDisplayMarkdown(message)} />
           </div>
-          {message.attachments && message.attachments.length > 0 ? (
-            <div className="attachments">
-              添付: {message.attachments.map((item) => item.text).join(' / ')}
-            </div>
-          ) : null}
         </article>
       ))}
     </div>
