@@ -310,6 +310,16 @@ function MessageList(props: {
   messageErrors: MessageErrors;
   containerRef?: RefObject<HTMLDivElement | null>;
 }): JSX.Element {
+  function roleLabel(role: Message['role']): string {
+    if (role === 'user') {
+      return 'You';
+    }
+    if (role === 'assistant') {
+      return 'Codex';
+    }
+    return role;
+  }
+
   function toDisplayMarkdown(message: Message): string {
     const body = message.contentMd.trim();
     const attachments = (message.attachments ?? [])
@@ -359,7 +369,10 @@ function MessageList(props: {
         return (
           <article key={message.id} className={`message ${message.role}`}>
             <header className="message-header">
-              <strong>{message.role}</strong>
+              <span className="message-author-meta">
+                <strong>{roleLabel(message.role)}</strong>
+                <small className="message-timestamp">{formatMessageTimestamp(message.createdAt)}</small>
+              </span>
               <span className={`message-status message-status-${statusMeta.tone}`}>
                 {statusMeta.streaming ? <span className="message-status-dot" aria-hidden="true" /> : null}
                 {statusMeta.label}
@@ -1199,6 +1212,16 @@ export function App(): JSX.Element {
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour12: false });
+}
+
+function formatMessageTimestamp(ts: number): string {
+  const date = new Date(ts);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
 function formatThreadUpdatedAt(ts: number): string {
