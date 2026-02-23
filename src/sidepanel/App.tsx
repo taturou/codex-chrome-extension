@@ -68,6 +68,47 @@ function MessageList({ messages }: { messages: Message[] }): JSX.Element {
   );
 }
 
+function getTabOriginPattern(tabUrl: string): string {
+  const parsed = new URL(tabUrl);
+  return `${parsed.origin}/*`;
+}
+
+function getTabProtocol(tabUrl: string): string {
+  return new URL(tabUrl).protocol;
+}
+
+async function getAttachableActiveTab(): Promise<chrome.tabs.Tab> {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab || typeof tab.id !== 'number') {
+    throw new Error('active tab が取得できませんでした');
+  }
+  if (!tab.url) {
+    throw new Error('tab の URL が取得できませんでした');
+  }
+
+  const protocol = getTabProtocol(tab.url);
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new Error(`このページでは選択を添付できません (${protocol})`);
+  }
+  return tab;
+}
+
+async function requestActiveTabHostPermission(tab: chrome.tabs.Tab): Promise<void> {
+  if (!tab.url) {
+    throw new Error('tab の URL が取得できませんでした');
+  }
+  const originPattern = getTabOriginPattern(tab.url);
+  const hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
+  if (hasPermission) {
+    return;
+  }
+  const granted = await chrome.permissions.request({ origins: [originPattern] });
+  if (!granted) {
+    throw new Error(`ページ権限が許可されませんでした (${originPattern})`);
+  }
+}
+
 export function App(): JSX.Element {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string>();
@@ -226,7 +267,9 @@ export function App(): JSX.Element {
 
   async function attachSelection(): Promise<void> {
     try {
-      await sendCommand<AttachSelectionResult>({ type: 'ATTACH_SELECTION', payload: {} });
+      const tab = await getAttachableActiveTab();
+      await requestActiveTabHostPermission(tab);
+      await sendCommand<AttachSelectionResult>({ type: 'ATTACH_SELECTION', payload: { tabId: tab.id } });
       setStatusReason('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -237,12 +280,17 @@ export function App(): JSX.Element {
   }
 
   async function sendMessage(): Promise<void> {
-    if (!currentThreadId || status !== 'connected' || (!input.trim() && pendingAttachments.length === 0)) {
+    await sendPayload(input, pendingAttachments);
+  }
+
+  async function sendAttachmentsOnly(): Promise<void> {
+    await sendPayload('', pendingAttachments);
+  }
+
+  async function sendPayload(text: string, attachments: Attachment[]): Promise<void> {
+    if (!currentThreadId || status !== 'connected' || (!text.trim() && attachments.length === 0)) {
       return;
     }
-
-    const text = input;
-    const attachments = pendingAttachments;
 
     setInput('');
     setPendingAttachments([]);
@@ -269,6 +317,10 @@ export function App(): JSX.Element {
       const message = error instanceof Error ? error.message : String(error);
       setStatusReason(`送信に失敗: ${message}`);
     }
+  }
+
+  function removePendingAttachment(index: number): void {
+    setPendingAttachments((prev) => prev.filter((_, idx) => idx !== index));
   }
 
   async function connectWs(): Promise<void> {
@@ -359,7 +411,20 @@ export function App(): JSX.Element {
         </label>
 
         {pendingAttachments.length > 0 ? (
-          <div className="attachments">添付候補: {pendingAttachments.map((item) => item.text).join(' / ')}</div>
+          <div className="pending-attachments">
+            <div className="attachments">添付候補（次の送信に同梱されます）</div>
+            <small>Enterで本文+添付送信 / 「添付のみ送信」で本文なし送信</small>
+            <div className="pending-attachment-list">
+              {pendingAttachments.map((item, index) => (
+                <div key={`${item.capturedAt}-${index}`} className="pending-attachment-item">
+                  <span>{item.text}</span>
+                  <button type="button" onClick={() => removePendingAttachment(index)}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : null}
 
         <textarea
@@ -372,9 +437,22 @@ export function App(): JSX.Element {
 
         <div className="composer-actions">
           <small>Enter送信 / Shift+Enter改行</small>
-          <button type="button" onClick={() => void sendMessage()}>
-            送信
-          </button>
+          <div className="composer-buttons">
+            <button
+              type="button"
+              onClick={() => void sendAttachmentsOnly()}
+              disabled={composerDisabled || pendingAttachments.length === 0}
+            >
+              添付のみ送信
+            </button>
+            <button
+              type="button"
+              onClick={() => void sendMessage()}
+              disabled={composerDisabled || (!input.trim() && pendingAttachments.length === 0)}
+            >
+              送信
+            </button>
+          </div>
         </div>
 
         <div className="ws-debug-log">

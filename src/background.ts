@@ -212,11 +212,39 @@ async function getActiveTab(tabId?: number): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
+function getTabOriginPattern(tabUrl: string): string {
+  const parsed = new URL(tabUrl);
+  return `${parsed.origin}/*`;
+}
+
+function getTabProtocol(tabUrl: string): string {
+  return new URL(tabUrl).protocol;
+}
+
+async function ensureTabHostPermission(tab: chrome.tabs.Tab): Promise<void> {
+  if (!tab.url) {
+    throw new Error('tab の URL が取得できませんでした');
+  }
+
+  const protocol = getTabProtocol(tab.url);
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new Error(`このページでは選択を添付できません (${protocol})`);
+  }
+
+  const originPattern = getTabOriginPattern(tab.url);
+  const hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
+  if (hasPermission) {
+    return;
+  }
+  throw new Error(`ページ権限が不足しています (${originPattern})`);
+}
+
 async function attachSelection(tabId?: number): Promise<Attachment> {
   const tab = await getActiveTab(tabId);
   if (typeof tab.id !== 'number') {
     throw new Error('tabId が不正です');
   }
+  await ensureTabHostPermission(tab);
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
