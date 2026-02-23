@@ -182,9 +182,9 @@ describe('StorageRepository reserveNextThreadTitle', () => {
     const t2 = await repo.reserveNextThreadTitle();
     const t3 = await repo.reserveNextThreadTitle();
 
-    expect(t1).toBe('スレッド #1');
-    expect(t2).toBe('スレッド #2');
-    expect(t3).toBe('スレッド #3');
+    expect(t1).toBe('Thread #1');
+    expect(t2).toBe('Thread #2');
+    expect(t3).toBe('Thread #3');
   });
 
   it('既存タイトルの最大番号より後ろを払い出す', async () => {
@@ -198,13 +198,13 @@ describe('StorageRepository reserveNextThreadTitle', () => {
     });
     await repo.upsertThread({
       id: 't2',
-      title: 'スレッド #8',
+      title: 'Thread #8',
       createdAt: 1,
       updatedAt: 1,
       lastMessageAt: 1
     });
 
     const title = await repo.reserveNextThreadTitle();
-    expect(title).toBe('スレッド #9');
+    expect(title).toBe('Thread #9');
   });
 });

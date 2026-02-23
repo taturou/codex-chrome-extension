@@ -15,22 +15,22 @@ export function App(): JSX.Element {
 
   async function save(): Promise<void> {
     await sendCommand({ type: 'SAVE_SETTINGS', payload: { wsUrl } });
-    setNotice('保存しました');
+    setNotice('Saved.');
   }
 
   async function connect(): Promise<void> {
     await sendCommand({ type: 'CONNECT_WS', payload: { url: wsUrl } });
-    setNotice('接続要求を送信しました');
+    setNotice('Connect request sent.');
   }
 
   async function disconnect(): Promise<void> {
     await sendCommand({ type: 'DISCONNECT_WS', payload: {} });
-    setNotice('切断要求を送信しました');
+    setNotice('Disconnect request sent.');
   }
 
   return (
     <main className="page">
-      <h1>設定</h1>
+      <h1>Settings</h1>
       <div className="row">
         <label htmlFor="ws-url">WebSocket URL</label>
         <input
@@ -42,13 +42,13 @@ export function App(): JSX.Element {
       </div>
       <div className="actions">
         <button type="button" onClick={() => void save()}>
-          保存
+          Save
         </button>
         <button type="button" onClick={() => void connect()}>
-          接続
+          Connect
         </button>
         <button type="button" onClick={() => void disconnect()}>
-          切断
+          Disconnect
         </button>
       </div>
       {notice ? <p>{notice}</p> : null}

@@ -127,9 +127,9 @@ function formatElapsed(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   if (minutes === 0) {
-    return `${seconds}秒`;
+    return `${seconds}s`;
   }
-  return `${minutes}分${seconds}秒`;
+  return `${minutes}m ${seconds}s`;
 }
 
 function getAssistantStatusMeta(input: {
@@ -228,25 +228,25 @@ function ThreadList(props: {
   }, [props.threads, query]);
 
   return (
-    <section className="threads-panel" aria-label="スレッド">
+    <section className="threads-panel" aria-label="Threads">
       <div className="threads-panel-header">
         <h2>Threads</h2>
         <button type="button" onClick={props.onCreate} className="primary-button">
-          新規
+          New
         </button>
       </div>
 
       <input
-        aria-label="スレッド検索"
+        aria-label="Search threads"
         className="threads-search"
-        placeholder="スレッド検索"
+        placeholder="Search threads"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
 
       <div className="threads">
         {filteredThreads.length === 0 ? (
-          <small className="thread-empty">一致するスレッドがありません</small>
+          <small className="thread-empty">No matching threads.</small>
         ) : (
           filteredThreads.map((thread) => (
             <div key={thread.id} className="thread-row">
@@ -256,24 +256,24 @@ function ThreadList(props: {
                 type="button"
               >
                 <span>{thread.title}</span>
-                <small className="thread-meta">更新: {formatThreadUpdatedAt(thread.updatedAt)}</small>
+                <small className="thread-meta">Updated: {formatThreadUpdatedAt(thread.updatedAt)}</small>
               </button>
               <div className="thread-actions">
                 <button
                   type="button"
                   className="thread-rename"
                   onClick={() => void openRenameDialog(thread, props.onRename)}
-                  aria-label={`スレッド ${thread.title} の名前を変更`}
+                  aria-label={`Rename thread ${thread.title}`}
                 >
-                  変更
+                  Rename
                 </button>
                 <button
                   type="button"
                   className="thread-delete"
                   onClick={() => props.onDelete(thread.id)}
-                  aria-label={`スレッド ${thread.title} を削除`}
+                  aria-label={`Delete thread ${thread.title}`}
                 >
-                  削除
+                  Delete
                 </button>
               </div>
             </div>
@@ -288,7 +288,7 @@ async function openRenameDialog(
   thread: Thread,
   onRename: (threadId: string, title: string) => Promise<void>
 ): Promise<void> {
-  const entered = globalThis.prompt('新しいスレッド名を入力してください', thread.title);
+  const entered = globalThis.prompt('Enter a new thread name', thread.title);
   if (entered === null) {
     return;
   }
@@ -312,8 +312,8 @@ function MessageList(props: {
     const body = message.contentMd.trim();
     const attachments = (message.attachments ?? [])
       .map((item, index) => {
-        const source = item.url ? `出典URL: ${item.url}\n\n` : '';
-        return `### 添付 ${index + 1} (${attachmentSummary(item)})\n\n${source}${item.text}`;
+        const source = item.url ? `Source URL: ${item.url}\n\n` : '';
+        return `### Attachment ${index + 1} (${attachmentSummary(item)})\n\n${source}${item.text}`;
       })
       .join('\n\n');
 
@@ -329,8 +329,8 @@ function MessageList(props: {
   if (props.messages.length === 0) {
     return (
       <div className="messages-empty">
-        <strong>メッセージがありません</strong>
-        <small>下の入力欄からチャットを開始してください</small>
+        <strong>No messages yet.</strong>
+        <small>Start a chat from the input box below.</small>
       </div>
     );
   }
@@ -387,22 +387,22 @@ async function getAttachableActiveTab(): Promise<chrome.tabs.Tab> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
   if (!tab || typeof tab.id !== 'number') {
-    throw new Error('active tab が取得できませんでした');
+    throw new Error('Failed to get active tab');
   }
   if (!tab.url) {
-    throw new Error('tab の URL が取得できませんでした');
+    throw new Error('Failed to get tab URL');
   }
 
   const protocol = getTabProtocol(tab.url);
   if (protocol !== 'http:' && protocol !== 'https:') {
-    throw new Error(`このページでは選択を添付できません (${protocol})`);
+    throw new Error(`Selection attachment is not available on this page (${protocol})`);
   }
   return tab;
 }
 
 async function requestActiveTabHostPermission(tab: chrome.tabs.Tab): Promise<void> {
   if (!tab.url) {
-    throw new Error('tab の URL が取得できませんでした');
+    throw new Error('Failed to get tab URL');
   }
   const originPattern = getTabOriginPattern(tab.url);
   const hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
@@ -411,16 +411,16 @@ async function requestActiveTabHostPermission(tab: chrome.tabs.Tab): Promise<voi
   }
   const granted = await chrome.permissions.request({ origins: [originPattern] });
   if (!granted) {
-    throw new Error(`ページ権限が許可されませんでした (${originPattern})`);
+    throw new Error(`Page permission was not granted (${originPattern})`);
   }
 }
 
 function attachmentSummary(attachment: Attachment): string {
   if (attachment.type === 'selected_text') {
-    return '選択範囲';
+    return 'Selected text';
   }
-  const scope = attachment.scope === 'dom_selection' ? 'DOM範囲' : '可視領域';
-  return `ページ参照(${scope})`;
+  const scope = attachment.scope === 'dom_selection' ? 'DOM selection' : 'Viewport';
+  return `Page context (${scope})`;
 }
 
 export function App(): JSX.Element {
@@ -466,15 +466,15 @@ export function App(): JSX.Element {
 
   const composerPlaceholder = useMemo(() => {
     if (!hasThread && !isConnected) {
-      return '先に接続し、スレッドを作成してください';
+      return 'Connect first, then create a thread';
     }
     if (!hasThread) {
-      return '先にスレッドを作成してください';
+      return 'Create a thread first';
     }
     if (!isConnected) {
-      return '送信するにはWS接続が必要です';
+      return 'WebSocket connection is required to send';
     }
-    return 'メッセージを入力';
+    return 'Type your message';
   }, [hasThread, isConnected]);
 
   useEffect(() => {
@@ -661,7 +661,7 @@ export function App(): JSX.Element {
 
   async function deleteThread(threadId: string): Promise<void> {
     const target = threads.find((item) => item.id === threadId);
-    const ok = globalThis.confirm(`スレッド「${target?.title ?? threadId}」を削除します。`);
+    const ok = globalThis.confirm(`Delete thread "${target?.title ?? threadId}"?`);
     if (!ok) {
       return;
     }
@@ -677,7 +677,7 @@ export function App(): JSX.Element {
       setStatusReason('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatusReason(`スレッド名の変更に失敗: ${message}`);
+      setStatusReason(`Failed to rename thread: ${message}`);
     }
   }
 
@@ -689,9 +689,7 @@ export function App(): JSX.Element {
       setStatusReason('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatusReason(
-        `選択の添付に失敗: ${message}。タブでテキストを再選択し、必要なら拡張アイコンをクリックして権限を再付与してください。`
-      );
+      setStatusReason(`Failed to attach selection: ${message}. Re-select text in the tab and re-grant permissions if needed.`);
     }
   }
 
@@ -740,7 +738,7 @@ export function App(): JSX.Element {
     setContextMode('dom');
     setDomSelectionActive(result.active);
     setDomSelectionCount(result.selectedCount);
-    setStatusReason('DOM選択モードを開始しました。ページ上をクリックして選択/解除できます。');
+    setStatusReason('DOM selection mode started. Click elements on the page to select/deselect.');
   }
 
   async function stopDomSelectionMode(nextMode: 'chat_only'): Promise<void> {
@@ -772,12 +770,12 @@ export function App(): JSX.Element {
       setDomSelectionActive(result.active);
       setDomSelectionCount(result.selectedCount);
       if (!silent) {
-        setStatusReason('DOM選択を全解除しました。');
+        setStatusReason('Cleared all DOM selections.');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!silent) {
-        setStatusReason(`DOM選択の全解除に失敗: ${message}`);
+        setStatusReason(`Failed to clear DOM selections: ${message}`);
       }
     }
   }
@@ -800,7 +798,7 @@ export function App(): JSX.Element {
       setStatusReason('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatusReason(`コンテキスト切替に失敗: ${message}`);
+      setStatusReason(`Failed to switch context mode: ${message}`);
     }
   }
 
@@ -816,8 +814,8 @@ export function App(): JSX.Element {
       payload: { tabId: tab.id, source: 'dom_or_viewport', maxChars: 12000 }
     });
 
-    const scope = result.source === 'dom_selection' ? 'DOM範囲' : '可視領域';
-    setStatusReason(`参照コンテキスト: ${scope}`);
+    const scope = result.source === 'dom_selection' ? 'DOM selection' : 'Viewport';
+    setStatusReason(`Context source: ${scope}`);
 
     return result.attachment;
   }
@@ -833,7 +831,7 @@ export function App(): JSX.Element {
     } else {
       setContextMode('chat_only');
     }
-    setStatusReason('ページ参照を1回送信し、参照モードをオフにしました。');
+    setStatusReason('Sent page context once and turned off context mode.');
   }
 
   async function sendMessage(): Promise<void> {
@@ -859,7 +857,7 @@ export function App(): JSX.Element {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setStatusReason(`ページコンテキスト取得に失敗: ${message}`);
+        setStatusReason(`Failed to capture page context: ${message}`);
       }
     }
 
@@ -889,7 +887,7 @@ export function App(): JSX.Element {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatusReason(`送信に失敗: ${message}`);
+      setStatusReason(`Failed to send: ${message}`);
     }
   }
 
@@ -905,7 +903,7 @@ export function App(): JSX.Element {
       setStatusReason('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatusReason(`接続に失敗: ${message}`);
+      setStatusReason(`Failed to connect: ${message}`);
     }
   }
 
@@ -916,13 +914,13 @@ export function App(): JSX.Element {
       setStatusReason('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatusReason(`切断に失敗: ${message}`);
+      setStatusReason(`Failed to disconnect: ${message}`);
     }
   }
 
   async function saveSettings(): Promise<void> {
     await sendCommand({ type: 'SAVE_SETTINGS', payload: { wsUrl } });
-    setStatusReason('接続URLを保存しました');
+    setStatusReason('Connection URL saved.');
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -943,11 +941,11 @@ export function App(): JSX.Element {
       .join('\n\n');
 
     try {
-      await navigator.clipboard.writeText(text || 'ログなし');
-      setCopyNotice(mode === 'latest' ? '最新ログをコピーしました' : '全ログをコピーしました');
+      await navigator.clipboard.writeText(text || 'No logs');
+      setCopyNotice(mode === 'latest' ? 'Copied latest log.' : 'Copied all logs.');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setCopyNotice(`コピー失敗: ${message}`);
+      setCopyNotice(`Copy failed: ${message}`);
     }
   }
 
@@ -955,18 +953,17 @@ export function App(): JSX.Element {
     <div className="app">
       <header className="header">
         <div className="header-main">
-          <strong>Codex Chat</strong>
           <StatusBadge status={status} />
         </div>
         <div className="header-actions">
           <UsageLimitBars usage={usageLimits} />
           {isConnected ? (
-            <button type="button" onClick={() => void disconnectWs()}>
-              切断
+            <button type="button" onClick={() => void disconnectWs()} className="icon-button" aria-label="Disconnect">
+              ✕
             </button>
           ) : (
             <button type="button" onClick={() => void connectWs()} className="primary-button">
-              接続
+              Connect
             </button>
           )}
         </div>
@@ -975,21 +972,21 @@ export function App(): JSX.Element {
       {statusReason ? <p className="status-reason">{statusReason}</p> : null}
 
       {!isConnected ? (
-        <section className="connection-gate" aria-label="接続設定">
-          <h2>接続設定</h2>
+        <section className="connection-gate" aria-label="Connection settings">
+          <h2>Connection Settings</h2>
           <label>
             Codex app-server URL
             <input value={wsUrl} onChange={(event) => setWsUrl(event.target.value)} placeholder="ws://127.0.0.1:4317" />
           </label>
           <div className="connection-gate-actions">
             <button type="button" onClick={() => void saveSettings()}>
-              URL保存
+              Save URL
             </button>
             <button type="button" onClick={() => void connectWs()} className="primary-button">
-              接続
+              Connect
             </button>
           </div>
-          <small>接続後にスレッドとチャットが表示されます。</small>
+          <small>Threads and chat will appear after connecting.</small>
         </section>
       ) : (
         <>
@@ -1002,7 +999,7 @@ export function App(): JSX.Element {
               onDelete={(id) => void deleteThread(id)}
               onRename={(id, title) => renameThread(id, title)}
             />
-            <section className="chat-panel" aria-label="チャット">
+            <section className="chat-panel" aria-label="Chat">
               <div className="chat-timeline">
                 {chatStalledByConnection ? (
                   <div className="chat-warning">
@@ -1020,7 +1017,7 @@ export function App(): JSX.Element {
 
               {pendingAttachments.length > 0 ? (
                 <div className="pending-attachments">
-                  <div className="attachments">添付候補（次の送信に同梱）</div>
+                  <div className="attachments">Pending attachments (included in next send)</div>
                   <div className="pending-attachment-list">
                     {pendingAttachments.map((item, index) => (
                       <div key={`${item.capturedAt}-${index}`} className="pending-attachment-item">
@@ -1030,7 +1027,7 @@ export function App(): JSX.Element {
                           <span>{item.text}</span>
                         </div>
                         <button type="button" onClick={() => removePendingAttachment(index)}>
-                          削除
+                          Remove
                         </button>
                       </div>
                     ))}
@@ -1039,14 +1036,14 @@ export function App(): JSX.Element {
               ) : null}
 
               <div className="composer">
-                <div className="context-controls" role="group" aria-label="参照コンテキスト">
+                <div className="context-controls" role="group" aria-label="Reference context">
                   <button
                     type="button"
                     className={`context-chip ${contextMode === 'chat_only' ? 'active' : ''}`}
                     onClick={() => void changeContextMode('chat_only')}
                     disabled={!isConnected}
                   >
-                    チャットのみ
+                    Chat only
                   </button>
                   <button
                     type="button"
@@ -1054,15 +1051,15 @@ export function App(): JSX.Element {
                     onClick={() => void changeContextMode('dom')}
                     disabled={!isConnected}
                   >
-                    DOM範囲
+                    DOM selection
                   </button>
                   {contextMode === 'dom' ? (
                     <>
                       <span className={`dom-mode-state ${domSelectionActive ? 'active' : 'inactive'}`}>
-                        {domSelectionActive ? '選択中' : '待機中'}: {domSelectionCount}件
+                        {domSelectionActive ? 'Active' : 'Idle'}: {domSelectionCount} items
                       </span>
                       <button type="button" onClick={() => void clearDomSelectionMode()} disabled={!isConnected}>
-                        DOM全解除
+                        Clear DOM
                       </button>
                     </>
                   ) : null}
@@ -1079,9 +1076,9 @@ export function App(): JSX.Element {
                 <div className="composer-actions">
                   <div className="composer-left-actions">
                     <button type="button" onClick={() => void attachSelection()} disabled={!isConnected}>
-                      現在ページの選択範囲を添付
+                      Attach current page selection
                     </button>
-                    <small>Enter改行 / Ctrl+Enter送信</small>
+                    <small>`Enter`: newline / `Ctrl+Enter`: send</small>
                   </div>
 
                   <div className="composer-buttons">
@@ -1090,7 +1087,7 @@ export function App(): JSX.Element {
                       onClick={() => void sendAttachmentsOnly()}
                       disabled={composerDisabled || (pendingAttachments.length === 0 && !contextArmed)}
                     >
-                      添付のみ送信
+                      Send attachments only
                     </button>
                     <button
                       type="button"
@@ -1098,7 +1095,7 @@ export function App(): JSX.Element {
                       className="primary-button"
                       disabled={composerDisabled || !hasAnyContentForSend}
                     >
-                      送信
+                      Send
                     </button>
                   </div>
                 </div>
@@ -1107,25 +1104,25 @@ export function App(): JSX.Element {
           </div>
 
           {devMode ? (
-            <section className="ws-debug-log" aria-label="WSデバッグログ">
+            <section className="ws-debug-log" aria-label="WS debug log">
               <div className="ws-debug-log-header">
-                <strong>WSログ</strong>
+                <strong>WS Logs</strong>
                 <div className="ws-debug-log-actions">
                   <button type="button" onClick={() => void copyWsLogs('latest')}>
-                    最新をコピー
+                    Copy latest
                   </button>
                   <button type="button" onClick={() => void copyWsLogs('all')}>
-                    全件をコピー
+                    Copy all
                   </button>
                   <button type="button" onClick={() => setWsLogs([])}>
-                    クリア
+                    Clear
                   </button>
                 </div>
               </div>
               {copyNotice ? <small>{copyNotice}</small> : null}
               <div className="ws-debug-log-body">
                 {wsLogs.length === 0 ? (
-                  <small>ログなし</small>
+                  <small>No logs</small>
                 ) : (
                   wsLogs.map((entry, index) => (
                     <div key={`${entry.ts}-${index}`} className={`ws-log-entry ${entry.category}`}>
@@ -1146,9 +1143,9 @@ export function App(): JSX.Element {
 }
 
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString('ja-JP', { hour12: false });
+  return new Date(ts).toLocaleTimeString('en-US', { hour12: false });
 }
 
 function formatThreadUpdatedAt(ts: number): string {
-  return new Date(ts).toLocaleString('ja-JP', { hour12: false });
+  return new Date(ts).toLocaleString('en-US', { hour12: false });
 }

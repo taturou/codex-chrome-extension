@@ -9,7 +9,7 @@ function now(): number {
 }
 
 function extractThreadNumber(title: string): number | undefined {
-  const matched = title.match(/^スレッド #(\d+)$/);
+  const matched = title.match(/^Thread #(\d+)$/);
   if (!matched) {
     return undefined;
   }
@@ -102,7 +102,7 @@ export class StorageRepository {
       const nextThreadNumber = Math.max(store.meta.nextThreadNumber ?? inferredNext, inferredNext);
       store.meta.nextThreadNumber = nextThreadNumber + 1;
       await this.saveStore(store);
-      return `スレッド #${nextThreadNumber}`;
+      return `Thread #${nextThreadNumber}`;
     });
   }
 

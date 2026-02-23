@@ -283,7 +283,7 @@ async function getActiveTab(tabId?: number): Promise<chrome.tabs.Tab> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
   if (!tab || typeof tab.id !== 'number') {
-    throw new Error('active tab が取得できませんでした');
+    throw new Error('Failed to get active tab');
   }
   return tab;
 }
@@ -299,12 +299,12 @@ function getTabProtocol(tabUrl: string): string {
 
 async function ensureTabHostPermission(tab: chrome.tabs.Tab): Promise<void> {
   if (!tab.url) {
-    throw new Error('tab の URL が取得できませんでした');
+    throw new Error('Failed to get tab URL');
   }
 
   const protocol = getTabProtocol(tab.url);
   if (protocol !== 'http:' && protocol !== 'https:') {
-    throw new Error(`このページでは選択を添付できません (${protocol})`);
+    throw new Error(`Selection attachment is not available on this page (${protocol})`);
   }
 
   const originPattern = getTabOriginPattern(tab.url);
@@ -312,13 +312,13 @@ async function ensureTabHostPermission(tab: chrome.tabs.Tab): Promise<void> {
   if (hasPermission) {
     return;
   }
-  throw new Error(`ページ権限が不足しています (${originPattern})`);
+  throw new Error(`Insufficient page permission (${originPattern})`);
 }
 
 async function attachSelection(tabId?: number): Promise<Attachment> {
   const tab = await getActiveTab(tabId);
   if (typeof tab.id !== 'number') {
-    throw new Error('tabId が不正です');
+    throw new Error('Invalid tabId');
   }
   await ensureTabHostPermission(tab);
 
@@ -353,7 +353,7 @@ async function attachSelection(tabId?: number): Promise<Attachment> {
 
   const first = results[0]?.result as { html: string; text: string; url: string } | undefined;
   if (!first || !first.text) {
-    throw new Error('選択テキストが空です');
+    throw new Error('Selected text is empty');
   }
 
   return {
@@ -485,9 +485,9 @@ async function runDomSelectionCommand(
         const panel = document.createElement('div');
         panel.id = panelId;
         panel.innerHTML = `
-          <span data-role="status">DOM選択モード</span>
-          <button type="button" data-kind="clear">全解除</button>
-          <button type="button" data-kind="done">完了</button>
+          <span data-role="status">DOM Selection Mode</span>
+          <button type="button" data-kind="clear">Clear</button>
+          <button type="button" data-kind="done">Done</button>
         `;
         panel.addEventListener('click', (event) => {
           const target = event.target;
@@ -526,7 +526,7 @@ async function runDomSelectionCommand(
         panel.dataset.active = state.active ? 'true' : 'false';
         const status = panel.querySelector('[data-role="status"]');
         if (status) {
-          status.textContent = `DOM選択 ${state.selectedIds.length}件 (Escで終了)`;
+          status.textContent = `DOM selected: ${state.selectedIds.length} (Esc to exit)`;
         }
       }
 
@@ -785,7 +785,7 @@ async function runDomSelectionCommand(
 async function startDomSelectionMode(tabId?: number): Promise<DomSelectionState> {
   const tab = await getActiveTab(tabId);
   if (typeof tab.id !== 'number') {
-    throw new Error('tabId が不正です');
+    throw new Error('Invalid tabId');
   }
   await ensureTabHostPermission(tab);
   return (await runDomSelectionCommand(tab.id, 'start')) as DomSelectionState;
@@ -794,7 +794,7 @@ async function startDomSelectionMode(tabId?: number): Promise<DomSelectionState>
 async function stopDomSelectionMode(tabId?: number): Promise<DomSelectionState> {
   const tab = await getActiveTab(tabId);
   if (typeof tab.id !== 'number') {
-    throw new Error('tabId が不正です');
+    throw new Error('Invalid tabId');
   }
   await ensureTabHostPermission(tab);
   return (await runDomSelectionCommand(tab.id, 'stop')) as DomSelectionState;
@@ -803,7 +803,7 @@ async function stopDomSelectionMode(tabId?: number): Promise<DomSelectionState> 
 async function clearDomSelection(tabId?: number): Promise<DomSelectionState> {
   const tab = await getActiveTab(tabId);
   if (typeof tab.id !== 'number') {
-    throw new Error('tabId が不正です');
+    throw new Error('Invalid tabId');
   }
   await ensureTabHostPermission(tab);
   return (await runDomSelectionCommand(tab.id, 'clear')) as DomSelectionState;
@@ -812,7 +812,7 @@ async function clearDomSelection(tabId?: number): Promise<DomSelectionState> {
 async function getDomSelectionState(tabId?: number): Promise<DomSelectionState> {
   const tab = await getActiveTab(tabId);
   if (typeof tab.id !== 'number') {
-    throw new Error('tabId が不正です');
+    throw new Error('Invalid tabId');
   }
   await ensureTabHostPermission(tab);
   return (await runDomSelectionCommand(tab.id, 'state')) as DomSelectionState;
@@ -825,12 +825,12 @@ async function capturePageContext(
 ): Promise<{ attachment: Attachment; source: 'viewport' | 'dom_selection' }> {
   const tab = await getActiveTab(tabId);
   if (typeof tab.id !== 'number') {
-    throw new Error('tabId が不正です');
+    throw new Error('Invalid tabId');
   }
   await ensureTabHostPermission(tab);
   const result = (await runDomSelectionCommand(tab.id, 'capture', maxChars, source)) as PageContextCapture;
   if (!result.text.trim()) {
-    throw new Error('ページコンテキストの取得結果が空です');
+    throw new Error('Page context capture returned empty text');
   }
 
   const markdownText = result.html
@@ -968,11 +968,11 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
     case 'RENAME_THREAD': {
       const title = command.payload.title.trim();
       if (!title) {
-        throw new Error('スレッド名は必須です');
+        throw new Error('Thread name is required');
       }
       const renamed = await repository.renameThread(command.payload.threadId, title);
       if (!renamed) {
-        throw new Error('対象スレッドが見つかりません');
+        throw new Error('Target thread was not found');
       }
       return { thread: renamed };
     }

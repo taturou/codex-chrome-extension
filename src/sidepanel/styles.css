@@ -129,6 +129,17 @@ button {
   cursor: pointer;
 }
 
+.icon-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;

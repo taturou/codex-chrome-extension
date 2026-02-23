@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Codex Side Panel Chat",
-  "version": "0.1.20",
-  "description": "Codex app-server と連携するサイドパネルチャット",
+  "name": "Codex Side Panel",
+  "version": "0.1.21",
+  "description": "Side panel chat extension for Codex app-server",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting", "tabs", "permissions"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "host_permissions": [
