@@ -5,3 +5,6 @@ personality = "friendly"
 
 [features]
 multi_agent = true
+
+[projects."/home/h-morishita/program/codex-chrome-extension"]
+trust_level = "trusted"

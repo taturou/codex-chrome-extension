@@ -1,0 +1,2 @@
+prefix_rule(pattern=["codex", "app-server"], decision="allow")
+prefix_rule(pattern=["node", "/tmp/ws-client/capture.js"], decision="allow")
