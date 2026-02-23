@@ -1,4 +1,12 @@
 export type WsStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
+export type WsDebugLogCategory = 'state' | 'send' | 'recv' | 'error';
+
+export interface WsDebugLogEntry {
+  ts: number;
+  category: WsDebugLogCategory;
+  message: string;
+  detail?: string;
+}
 
 export interface Setting {
   wsUrl: string;

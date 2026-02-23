@@ -25,7 +25,7 @@ class FakeWebSocket {
 
   close(): void {
     this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.({} as CloseEvent);
+    this.onclose?.({ code: 1000, reason: '' } as CloseEvent);
   }
 }
 
@@ -42,9 +42,28 @@ describe('WebSocketTransport', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
+  function openAndInitialize(socket: FakeWebSocket): void {
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.onopen?.({} as Event);
+    const initializeRaw = socket.sent.find((entry) => entry.includes('"method":"initialize"'));
+    if (!initializeRaw) {
+      throw new Error('initialize not sent');
+    }
+    const initialize = JSON.parse(initializeRaw) as { id: string };
+    socket.onmessage?.({
+      data: JSON.stringify({
+        id: initialize.id,
+        result: {
+          userAgent: 'test'
+        }
+      })
+    } as MessageEvent);
+  }
+
   it('CONNECTING中のconnect呼び出しでsocketを多重生成しない', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
+      onDebug: () => {},
       onToken: () => {},
       onDone: () => {},
       onError: () => {}
@@ -59,6 +78,7 @@ describe('WebSocketTransport', () => {
   it('reconnectNowでURL更新して再接続する', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
+      onDebug: () => {},
       onToken: () => {},
       onDone: () => {},
       onError: () => {}
@@ -76,6 +96,7 @@ describe('WebSocketTransport', () => {
     const onToken = vi.fn();
     const transport = new WebSocketTransport({
       onStatus: () => {},
+      onDebug: () => {},
       onToken,
       onDone: () => {},
       onError: () => {}
@@ -83,6 +104,7 @@ describe('WebSocketTransport', () => {
 
     transport.connect('ws://localhost:3000');
     const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
 
     socket.onmessage?.({
       data: JSON.stringify({
@@ -107,6 +129,7 @@ describe('WebSocketTransport', () => {
     const onDone = vi.fn();
     const transport = new WebSocketTransport({
       onStatus: () => {},
+      onDebug: () => {},
       onToken: () => {},
       onDone,
       onError: () => {}
@@ -114,7 +137,7 @@ describe('WebSocketTransport', () => {
 
     transport.connect('ws://localhost:3000');
     const socket = FakeWebSocket.instances[0];
-    socket.readyState = FakeWebSocket.OPEN;
+    openAndInitialize(socket);
 
     transport.sendChat({
       threadId: 't1',
@@ -139,10 +162,98 @@ describe('WebSocketTransport', () => {
     });
   });
 
+  it('item/completed は done として扱わない', () => {
+    const onDone = vi.fn();
+    const transport = new WebSocketTransport({
+      onStatus: () => {},
+      onDebug: () => {},
+      onToken: () => {},
+      onDone,
+      onError: () => {}
+    });
+
+    transport.connect('ws://localhost:3000');
+    const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        method: 'item/completed',
+        params: {
+          threadId: 't1',
+          turnId: 'turn-1',
+          item: { id: 'item-1' }
+        }
+      })
+    } as MessageEvent);
+
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it('agent message delta の重複系イベントを二重反映しない', () => {
+    const onToken = vi.fn();
+    const transport = new WebSocketTransport({
+      onStatus: () => {},
+      onDebug: () => {},
+      onToken,
+      onDone: () => {},
+      onError: () => {}
+    });
+
+    transport.connect('ws://localhost:3000');
+    const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        method: 'codex/event/agent_message_content_delta',
+        params: {
+          msg: {
+            type: 'agent_message_content_delta',
+            thread_id: 't1',
+            item_id: 'm1',
+            delta: 'こんにちは'
+          }
+        }
+      })
+    } as MessageEvent);
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        method: 'item/agentMessage/delta',
+        params: {
+          threadId: 't1',
+          itemId: 'm1',
+          delta: 'こんにちは'
+        }
+      })
+    } as MessageEvent);
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        method: 'codex/event/agent_message_delta',
+        params: {
+          msg: {
+            type: 'agent_message_delta',
+            delta: 'こんにちは'
+          }
+        }
+      })
+    } as MessageEvent);
+
+    expect(onToken).toHaveBeenCalledTimes(1);
+    expect(onToken).toHaveBeenCalledWith({
+      threadId: 't1',
+      messageId: 'm1',
+      token: 'こんにちは'
+    });
+  });
+
   it('JSON-RPC error response を onError に流す', () => {
     const onError = vi.fn();
     const transport = new WebSocketTransport({
       onStatus: () => {},
+      onDebug: () => {},
       onToken: () => {},
       onDone: () => {},
       onError
@@ -150,6 +261,7 @@ describe('WebSocketTransport', () => {
 
     transport.connect('ws://localhost:3000');
     const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
 
     socket.onmessage?.({
       data: JSON.stringify({
@@ -166,5 +278,102 @@ describe('WebSocketTransport', () => {
       messageId: undefined,
       error: 'thread not found'
     });
+  });
+
+  it('initialized は initialize 応答後に送信する', () => {
+    const transport = new WebSocketTransport({
+      onStatus: () => {},
+      onDebug: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {}
+    });
+
+    transport.connect('ws://localhost:3000');
+    const socket = FakeWebSocket.instances[0];
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.onopen?.({} as Event);
+
+    expect(socket.sent.some((entry) => entry.includes('"method":"initialize"'))).toBe(true);
+    expect(socket.sent.some((entry) => entry.includes('"method":"initialized"'))).toBe(false);
+
+    const initializeRaw = socket.sent.find((entry) => entry.includes('"method":"initialize"'));
+    if (!initializeRaw) {
+      throw new Error('initialize not sent');
+    }
+    const initialize = JSON.parse(initializeRaw) as { id: string };
+    socket.onmessage?.({
+      data: JSON.stringify({
+        id: initialize.id,
+        result: { userAgent: 'test' }
+      })
+    } as MessageEvent);
+
+    expect(socket.sent.some((entry) => entry.includes('"method":"initialized"'))).toBe(true);
+
+    const initializePayload = JSON.parse(initializeRaw) as Record<string, unknown>;
+    expect('jsonrpc' in initializePayload).toBe(false);
+    const initializedRaw = socket.sent.find((entry) => entry.includes('"method":"initialized"'));
+    if (!initializedRaw) {
+      throw new Error('initialized not sent');
+    }
+    const initializedPayload = JSON.parse(initializedRaw) as Record<string, unknown>;
+    expect('jsonrpc' in initializedPayload).toBe(false);
+  });
+
+  it('-32001 を受けたら turn/start を再試行する', () => {
+    vi.useFakeTimers();
+    try {
+      const onError = vi.fn();
+      const transport = new WebSocketTransport({
+        onStatus: () => {},
+        onDebug: () => {},
+        onToken: () => {},
+        onDone: () => {},
+        onError
+      });
+
+      transport.connect('ws://localhost:3000');
+      const socket = FakeWebSocket.instances[0];
+      openAndInitialize(socket);
+
+      transport.sendChat({
+        threadId: 't1',
+        messageId: 'local-msg-1',
+        text: 'hi',
+        attachments: []
+      });
+
+      const threadStartRaw = socket.sent.find((entry) => entry.includes('"method":"thread/start"'));
+      if (!threadStartRaw) {
+        throw new Error('thread/start not sent');
+      }
+      const threadStart = JSON.parse(threadStartRaw) as { id: string };
+      socket.onmessage?.({
+        data: JSON.stringify({
+          id: threadStart.id,
+          result: { thread: { id: 'remote-t1' } }
+        })
+      } as MessageEvent);
+
+      const firstTurnStartRaw = socket.sent.find((entry) => entry.includes('"method":"turn/start"'));
+      if (!firstTurnStartRaw) {
+        throw new Error('turn/start not sent');
+      }
+      const firstTurnStart = JSON.parse(firstTurnStartRaw) as { id: string };
+      socket.onmessage?.({
+        data: JSON.stringify({
+          id: firstTurnStart.id,
+          error: { code: -32001, message: 'queue full' }
+        })
+      } as MessageEvent);
+
+      vi.runAllTimers();
+      const turnStartCount = socket.sent.filter((entry) => entry.includes('"method":"turn/start"')).length;
+      expect(turnStartCount).toBe(2);
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

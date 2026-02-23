@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "ws:proxy": "node scripts/ws-proxy.mjs"
   },
   "dependencies": {
     "@openai/codex": "^0.104.0",

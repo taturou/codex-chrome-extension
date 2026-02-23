@@ -1,9 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Codex Side Panel Chat",
-  "version": "0.1.0",
+  "version": "0.1.8",
   "description": "Codex app-server と連携するサイドパネルチャット",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": [
+    "ws://localhost/*",
+    "ws://127.0.0.1/*",
+    "wss://localhost/*",
+    "wss://127.0.0.1/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://localhost/*",
+    "https://127.0.0.1/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

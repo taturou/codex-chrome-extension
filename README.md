@@ -45,13 +45,21 @@ npm run build
 
 4. `Options` で WebSocket URL を保存します（未設定時デフォルト: `ws://localhost:3000`）。
 
-5. 必要に応じて app-server を起動します（例）。
+5. app-server を起動します（例）。
 
 ```bash
-codex app-server --listen ws://127.0.0.1:4317
+codex app-server --listen ws://127.0.0.1:43171
 ```
 
-注: 上記コマンドを使う場合、拡張の WebSocket URL も `ws://127.0.0.1:4317` に合わせてください。
+6. `Sec-WebSocket-Extensions` の握手相性回避のため、ローカルWSプロキシを起動します。
+
+```bash
+WS_PROXY_UPSTREAM_PORT=43171 WS_PROXY_LISTEN_PORT=43173 npm run ws:proxy
+```
+
+7. 拡張の WebSocket URL を `ws://127.0.0.1:43173` に設定します。
+
+注: 43173 はプロキシ、43171 は app-server のポートです。
 
 ## 使い方
 
@@ -67,6 +75,7 @@ codex app-server --listen ws://127.0.0.1:4317
 - `npm run build`: 拡張ビルド（`dist/` 出力）
 - `npm test`: Vitest 実行
 - `npm run lint`: ESLint 実行
+- `npm run ws:proxy`: ローカルWSプロキシ起動（拡張 -> proxy -> app-server）
 
 ## メッセージ契約（内部）
 
@@ -110,7 +119,7 @@ Event:
 
 ## 検証状況
 
-- `npm test`: 15 tests passed
+- `npm test`: 20 tests passed
 - `npm run build`: 成功（`dist/` 生成）
 
 ## 参照

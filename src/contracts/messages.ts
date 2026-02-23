@@ -1,4 +1,4 @@
-import type { Attachment, Message, Setting, Thread, WsStatus } from './types';
+import type { Attachment, Message, Setting, Thread, WsDebugLogEntry, WsStatus } from './types';
 
 export interface RuntimeEnvelope<T extends string, P> {
   type: T;
@@ -8,6 +8,7 @@ export interface RuntimeEnvelope<T extends string, P> {
 export type RuntimeCommand =
   | RuntimeEnvelope<'CONNECT_WS', { url?: string }>
   | RuntimeEnvelope<'DISCONNECT_WS', Record<string, never>>
+  | RuntimeEnvelope<'GET_WS_STATUS', Record<string, never>>
   | RuntimeEnvelope<'SEND_CHAT_MESSAGE', { threadId: string; text: string; attachments: Attachment[] }>
   | RuntimeEnvelope<'ATTACH_SELECTION', { tabId?: number }>
   | RuntimeEnvelope<'CREATE_THREAD', { title?: string }>
@@ -20,6 +21,7 @@ export type RuntimeCommand =
 
 export type SidePanelEvent =
   | RuntimeEnvelope<'WS_STATUS_CHANGED', { status: WsStatus; reason?: string }>
+  | RuntimeEnvelope<'WS_DEBUG_LOG', { entry: WsDebugLogEntry }>
   | RuntimeEnvelope<'CHAT_TOKEN', { threadId: string; messageId: string; token: string }>
   | RuntimeEnvelope<'CHAT_DONE', { threadId: string; messageId: string }>
   | RuntimeEnvelope<'CHAT_ERROR', { threadId: string; messageId: string; error: string }>
@@ -50,4 +52,9 @@ export interface CreateThreadResult {
 
 export interface AttachSelectionResult {
   attachment: Attachment;
+}
+
+export interface WsStatusResult {
+  status: WsStatus;
+  reason?: string;
 }

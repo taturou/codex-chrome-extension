@@ -46,12 +46,7 @@ async function broadcast(event: SidePanelEvent): Promise<void> {
 }
 
 function isSidePanelPort(port: chrome.runtime.Port): boolean {
-  if (port.name !== SIDEPANEL_EVENT_PORT_NAME) {
-    return false;
-  }
-
-  const senderUrl = port.sender?.url;
-  return typeof senderUrl === 'string' && senderUrl.includes('/sidepanel.html');
+  return port.name === SIDEPANEL_EVENT_PORT_NAME;
 }
 
 async function setStatus(status: WsStatus, reason?: string): Promise<void> {
@@ -128,6 +123,12 @@ async function updateMessageStatusWithFallback(
 const transport = new WebSocketTransport({
   onStatus: (status, reason) => {
     void setStatus(status, reason);
+  },
+  onDebug: (entry) => {
+    void broadcast({
+      type: 'WS_DEBUG_LOG',
+      payload: { entry }
+    });
   },
   onToken: ({ threadId, messageId, token }) => {
     void (async () => {
@@ -254,6 +255,9 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
       transport.disconnect();
       return { status: wsStatus, reason: wsReason };
     }
+    case 'GET_WS_STATUS': {
+      return { status: wsStatus, reason: wsReason };
+    }
     case 'SEND_CHAT_MESSAGE': {
       const thread = await ensureThread(command.payload.threadId);
       const userMessage: Message = {
@@ -372,6 +376,7 @@ function isRuntimeCommand(message: unknown): message is RuntimeCommand {
   return [
     'CONNECT_WS',
     'DISCONNECT_WS',
+    'GET_WS_STATUS',
     'SEND_CHAT_MESSAGE',
     'ATTACH_SELECTION',
     'CREATE_THREAD',
@@ -390,11 +395,19 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onConnect.addListener((port) => {
   if (!isSidePanelPort(port)) {
-    port.disconnect();
     return;
   }
 
   sidePanelPorts.add(port);
+  try {
+    port.postMessage({
+      type: 'WS_STATUS_CHANGED',
+      payload: { status: wsStatus, reason: wsReason }
+    } satisfies SidePanelEvent);
+  } catch {
+    sidePanelPorts.delete(port);
+    return;
+  }
   port.onDisconnect.addListener(() => {
     sidePanelPorts.delete(port);
   });

@@ -34,6 +34,18 @@ body {
   background: #f1f5f9;
 }
 
+.status-connected {
+  border-color: #166534;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-disconnected {
+  border-color: #b91c1c;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .toolbar {
   display: flex;
   gap: 8px;
@@ -104,6 +116,75 @@ textarea {
   display: flex;
   gap: 8px;
   justify-content: space-between;
+}
+
+.ws-debug-log {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 6px;
+}
+
+.ws-debug-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ws-debug-log-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ws-debug-log-body {
+  max-height: 180px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.ws-log-entry {
+  font-size: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: #f8fafc;
+}
+
+.ws-log-entry .ts {
+  color: #475569;
+  margin-right: 6px;
+}
+
+.ws-log-entry .cat {
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+.ws-log-entry.state .cat {
+  color: #0f766e;
+}
+
+.ws-log-entry.send .cat {
+  color: #1d4ed8;
+}
+
+.ws-log-entry.recv .cat {
+  color: #7c3aed;
+}
+
+.ws-log-entry.error .cat {
+  color: #b91c1c;
+}
+
+.ws-log-entry .detail {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 4px;
+  padding: 4px;
 }
 
 .attachments {

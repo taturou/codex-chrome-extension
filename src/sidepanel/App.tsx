@@ -5,9 +5,10 @@ import type {
   ListThreadsResult,
   MessagesResult,
   SettingsResult,
-  SidePanelEvent
+  SidePanelEvent,
+  WsStatusResult
 } from '../contracts/messages';
-import type { Attachment, Message, Thread, WsStatus } from '../contracts/types';
+import type { Attachment, Message, Thread, WsDebugLogEntry, WsStatus } from '../contracts/types';
 import { SafeMarkdown } from '../shared/markdown';
 import { sendCommand, listenEvents } from '../shared/runtime';
 
@@ -16,7 +17,7 @@ interface MessagesByThread {
 }
 
 function StatusBadge({ status }: { status: WsStatus }): JSX.Element {
-  return <span className="status">{status}</span>;
+  return <span className={`status status-${status}`}>{status}</span>;
 }
 
 function ThreadList(props: {
@@ -76,6 +77,8 @@ export function App(): JSX.Element {
   const [status, setStatus] = useState<WsStatus>('disconnected');
   const [statusReason, setStatusReason] = useState<string>('');
   const [wsUrl, setWsUrl] = useState('');
+  const [wsLogs, setWsLogs] = useState<WsDebugLogEntry[]>([]);
+  const [copyNotice, setCopyNotice] = useState('');
 
   const currentMessages = useMemo(() => {
     if (!currentThreadId) {
@@ -83,6 +86,23 @@ export function App(): JSX.Element {
     }
     return messagesByThread[currentThreadId] ?? [];
   }, [currentThreadId, messagesByThread]);
+
+  const hasThread = Boolean(currentThreadId);
+  const isConnected = status === 'connected';
+  const composerDisabled = !hasThread || !isConnected;
+
+  const composerPlaceholder = useMemo(() => {
+    if (!hasThread && !isConnected) {
+      return '先に「新規スレッド」を作成し、WSに接続してください';
+    }
+    if (!hasThread) {
+      return '先に「新規スレッド」を作成してください';
+    }
+    if (!isConnected) {
+      return '送信するにはWS接続が必要です';
+    }
+    return 'メッセージ';
+  }, [hasThread, isConnected]);
 
   async function loadThreadsAndMaybeMessages(): Promise<void> {
     const list = await sendCommand<ListThreadsResult>({ type: 'LIST_THREADS', payload: {} });
@@ -105,10 +125,27 @@ export function App(): JSX.Element {
     setWsUrl(res.settings.wsUrl);
   }
 
+  async function loadWsStatus(): Promise<void> {
+    const res = await sendCommand<WsStatusResult>({ type: 'GET_WS_STATUS', payload: {} });
+    setStatus(res.status);
+    setStatusReason(res.reason ?? '');
+  }
+
   function applySidePanelEvent(event: SidePanelEvent): void {
     if (event.type === 'WS_STATUS_CHANGED') {
       setStatus(event.payload.status);
       setStatusReason(event.payload.reason ?? '');
+      return;
+    }
+
+    if (event.type === 'WS_DEBUG_LOG') {
+      setWsLogs((prev) => {
+        const next = [...prev, event.payload.entry];
+        if (next.length > 200) {
+          return next.slice(next.length - 200);
+        }
+        return next;
+      });
       return;
     }
 
@@ -158,8 +195,15 @@ export function App(): JSX.Element {
   useEffect(() => {
     void loadThreadsAndMaybeMessages();
     void loadSettings();
+    void loadWsStatus();
     const unlisten = listenEvents(applySidePanelEvent);
-    return () => unlisten();
+    const intervalId = globalThis.setInterval(() => {
+      void loadWsStatus();
+    }, 1000);
+    return () => {
+      unlisten();
+      clearInterval(intervalId);
+    };
   }, []);
 
   async function createThread(): Promise<void> {
@@ -193,7 +237,7 @@ export function App(): JSX.Element {
   }
 
   async function sendMessage(): Promise<void> {
-    if (!currentThreadId || (!input.trim() && pendingAttachments.length === 0)) {
+    if (!currentThreadId || status !== 'connected' || (!input.trim() && pendingAttachments.length === 0)) {
       return;
     }
 
@@ -203,30 +247,44 @@ export function App(): JSX.Element {
     setInput('');
     setPendingAttachments([]);
 
-    await sendCommand({
-      type: 'SEND_CHAT_MESSAGE',
-      payload: {
-        threadId: currentThreadId,
-        text,
-        attachments
-      }
-    });
+    try {
+      await sendCommand({
+        type: 'SEND_CHAT_MESSAGE',
+        payload: {
+          threadId: currentThreadId,
+          text,
+          attachments
+        }
+      });
 
-    const res = await sendCommand<MessagesResult>({
-      type: 'GET_THREAD_MESSAGES',
-      payload: { threadId: currentThreadId }
-    });
+      const res = await sendCommand<MessagesResult>({
+        type: 'GET_THREAD_MESSAGES',
+        payload: { threadId: currentThreadId }
+      });
 
-    setMessagesByThread((prev) => ({ ...prev, [currentThreadId]: res.messages }));
-    await loadThreadsAndMaybeMessages();
+      setMessagesByThread((prev) => ({ ...prev, [currentThreadId]: res.messages }));
+      await loadThreadsAndMaybeMessages();
+      setStatusReason('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusReason(`送信に失敗: ${message}`);
+    }
   }
 
   async function connectWs(): Promise<void> {
     await sendCommand({ type: 'CONNECT_WS', payload: { url: wsUrl } });
+    await loadWsStatus();
   }
 
   async function disconnectWs(): Promise<void> {
-    await sendCommand({ type: 'DISCONNECT_WS', payload: {} });
+    try {
+      await sendCommand({ type: 'DISCONNECT_WS', payload: {} });
+      await loadWsStatus();
+      setStatusReason('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusReason(`切断に失敗: ${message}`);
+    }
   }
 
   async function saveSettings(): Promise<void> {
@@ -237,6 +295,24 @@ export function App(): JSX.Element {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void sendMessage();
+    }
+  }
+
+  async function copyWsLogs(): Promise<void> {
+    const text = wsLogs
+      .map((entry) => {
+        const time = formatTime(entry.ts);
+        const detail = entry.detail ? `\n${entry.detail}` : '';
+        return `${time} [${entry.category}] ${entry.message}${detail}`;
+      })
+      .join('\n\n');
+
+    try {
+      await navigator.clipboard.writeText(text || 'ログなし');
+      setCopyNotice('コピーしました');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCopyNotice(`コピー失敗: ${message}`);
     }
   }
 
@@ -287,10 +363,11 @@ export function App(): JSX.Element {
         ) : null}
 
         <textarea
-          placeholder="メッセージ"
+          placeholder={composerPlaceholder}
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={onComposerKeyDown}
+          disabled={composerDisabled}
         />
 
         <div className="composer-actions">
@@ -299,7 +376,40 @@ export function App(): JSX.Element {
             送信
           </button>
         </div>
+
+        <div className="ws-debug-log">
+          <div className="ws-debug-log-header">
+            <strong>WSログ</strong>
+            <div className="ws-debug-log-actions">
+              <button type="button" onClick={() => void copyWsLogs()}>
+                コピー
+              </button>
+              <button type="button" onClick={() => setWsLogs([])}>
+                クリア
+              </button>
+            </div>
+          </div>
+          {copyNotice ? <small>{copyNotice}</small> : null}
+          <div className="ws-debug-log-body">
+            {wsLogs.length === 0 ? (
+              <small>ログなし</small>
+            ) : (
+              wsLogs.map((entry, index) => (
+                <div key={`${entry.ts}-${index}`} className={`ws-log-entry ${entry.category}`}>
+                  <span className="ts">{formatTime(entry.ts)}</span>
+                  <span className="cat">[{entry.category}]</span>
+                  <span className="msg">{entry.message}</span>
+                  {entry.detail ? <pre className="detail">{entry.detail}</pre> : null}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString('ja-JP', { hour12: false });
 }
