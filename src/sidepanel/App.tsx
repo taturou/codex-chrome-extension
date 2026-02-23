@@ -48,21 +48,46 @@ function rateLimitPercent(item: RateLimitItem): number {
   return Math.max(0, Math.min(100, item.usedPercent));
 }
 
-function rateLimitMeta(item: RateLimitItem): string {
-  const p = rateLimitPercent(item);
-  const win = typeof item.windowDurationMins === 'number' ? `${item.windowDurationMins}m` : '';
-  if (win) {
-    return `${Math.round(p)}% / ${win}`;
-  }
-  return `${Math.round(p)}%`;
+function rateLimitLeftPercent(item: RateLimitItem): number {
+  return Math.max(0, Math.min(100, 100 - rateLimitPercent(item)));
 }
 
-function rateLimitLabel(limitId: string): string {
-  return limitId.replace(/_/g, ' ');
+function rateLimitMeta(item: RateLimitItem): string {
+  return `${Math.round(rateLimitLeftPercent(item))}% left`;
+}
+
+function isPrimaryLimit(item: RateLimitItem): boolean {
+  const limitId = item.limitId.toLowerCase();
+  return limitId.includes('primary') || item.windowDurationMins === 300;
+}
+
+function isWeeklyLimit(item: RateLimitItem): boolean {
+  const limitId = item.limitId.toLowerCase();
+  return limitId.includes('secondary') || item.windowDurationMins === 10080;
+}
+
+function rateLimitLabel(item: RateLimitItem): string {
+  if (isPrimaryLimit(item)) {
+    return '5h limit:';
+  }
+  if (isWeeklyLimit(item)) {
+    return 'Weekly limit:';
+  }
+  return 'Limit:';
+}
+
+function rateLimitSortKey(item: RateLimitItem): number {
+  if (isPrimaryLimit(item)) {
+    return 0;
+  }
+  if (isWeeklyLimit(item)) {
+    return 1;
+  }
+  return 2;
 }
 
 function UsageLimitBars({ usage }: { usage: UsageLimits }): JSX.Element {
-  const limits = usage.rateLimits;
+  const limits = [...usage.rateLimits].sort((a, b) => rateLimitSortKey(a) - rateLimitSortKey(b));
 
   if (limits.length === 0) {
     return (
@@ -81,12 +106,13 @@ function UsageLimitBars({ usage }: { usage: UsageLimits }): JSX.Element {
   return (
     <div className="usage-bars" aria-label="Codex usage limit">
       {limits.slice(0, 2).map((item) => {
-        const percent = rateLimitPercent(item);
+        const leftPercent = rateLimitLeftPercent(item);
+        const label = rateLimitLabel(item);
         return (
           <div key={item.limitId} className="usage-row">
-            <small title={item.limitId}>{rateLimitLabel(item.limitId)}</small>
-            <div className="usage-track" role="img" aria-label={`${item.limitId} ${Math.round(percent)} percent`}>
-              <div className="usage-fill" style={{ width: `${percent}%` }} />
+            <small title={item.limitId}>{label}</small>
+            <div className="usage-track" role="img" aria-label={`${label} ${Math.round(leftPercent)} percent left`}>
+              <div className="usage-fill" style={{ width: `${leftPercent}%` }} />
             </div>
             <small>{rateLimitMeta(item)}</small>
           </div>
