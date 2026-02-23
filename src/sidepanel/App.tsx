@@ -900,7 +900,7 @@ export function App(): JSX.Element {
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       void sendMessage();
     }
@@ -1055,7 +1055,7 @@ export function App(): JSX.Element {
                     <button type="button" onClick={() => void attachSelection()} disabled={!isConnected}>
                       現在ページの選択範囲を添付
                     </button>
-                    <small>Enter送信 / Shift+Enter改行</small>
+                    <small>Enter改行 / Ctrl+Enter送信</small>
                   </div>
 
                   <div className="composer-buttons">

@@ -26,7 +26,7 @@
   - `appendToken` は `done/error` 後の遅延token上書きを拒否
 - `src/sidepanel/*`
   - スレッド一覧、メッセージ表示、入力、添付、再接続UI
-  - Enter送信/Shift+Enter改行
+  - Enter改行/Ctrl+Enter送信
   - Markdown表示は `SafeMarkdown`（`react-markdown` + `remark-gfm` + `rehype-sanitize`）で描画
 - `src/options/*`
   - wsUrl保存と接続・切断要求

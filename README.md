@@ -65,7 +65,7 @@ WS_PROXY_UPSTREAM_PORT=43171 WS_PROXY_LISTEN_PORT=43173 npm run ws:proxy
 
 1. 拡張アイコンをクリックして Side Panel を開きます。
 2. `新規スレッド` で会話を開始します。
-3. テキストを入力し `Enter` で送信します（`Shift+Enter` は改行）。
+3. テキストを入力し `Enter` で改行します（`Ctrl+Enter` で送信）。
 4. ページ上で文字列を選択し `選択を添付` を押すと添付されます。
 5. 接続異常時は `再接続`、明示切断時は `切断` を使用します。
 

@@ -72,7 +72,7 @@
 3. host_permissions は初期最小化（恒久 `<all_urls>` は付与しない）
 4. `action` から side panel を開く動線を提供
 - UI仕様:
-1. Enter送信、Shift+Enter改行
+1. Enter改行、Ctrl+Enter送信
 2. 「選択を添付」ボタンでのみページ選択を取り込む
 3. Markdown + コードハイライト表示
 4. 接続状態バッジ（connected/connecting/disconnected/error）
