@@ -132,3 +132,79 @@ describe('StorageRepository appendToken', () => {
     expect(messages[0].status).toBe('done');
   });
 });
+
+describe('StorageRepository renameThread', () => {
+  beforeEach(() => {
+    const local = createChromeStorageMock();
+    vi.stubGlobal('chrome', {
+      storage: { local }
+    });
+  });
+
+  it('既存スレッドのタイトルと updatedAt を更新する', async () => {
+    const repo = new StorageRepository();
+    await repo.upsertThread({
+      id: 't1',
+      title: 'old',
+      createdAt: 1,
+      updatedAt: 1,
+      lastMessageAt: 1
+    });
+
+    const before = await repo.listThreads();
+    await repo.renameThread('t1', 'new-title');
+    const after = await repo.listThreads();
+
+    expect(before[0].title).toBe('old');
+    expect(after[0].title).toBe('new-title');
+    expect(after[0].updatedAt).toBeGreaterThanOrEqual(before[0].updatedAt);
+    expect(after[0].lastMessageAt).toBe(1);
+  });
+
+  it('存在しないスレッドIDの場合は undefined を返す', async () => {
+    const repo = new StorageRepository();
+    const result = await repo.renameThread('missing', 'x');
+    expect(result).toBeUndefined();
+  });
+});
+
+describe('StorageRepository reserveNextThreadTitle', () => {
+  beforeEach(() => {
+    const local = createChromeStorageMock();
+    vi.stubGlobal('chrome', {
+      storage: { local }
+    });
+  });
+
+  it('順番にスレッド番号を払い出す', async () => {
+    const repo = new StorageRepository();
+    const t1 = await repo.reserveNextThreadTitle();
+    const t2 = await repo.reserveNextThreadTitle();
+    const t3 = await repo.reserveNextThreadTitle();
+
+    expect(t1).toBe('スレッド #1');
+    expect(t2).toBe('スレッド #2');
+    expect(t3).toBe('スレッド #3');
+  });
+
+  it('既存タイトルの最大番号より後ろを払い出す', async () => {
+    const repo = new StorageRepository();
+    await repo.upsertThread({
+      id: 't1',
+      title: 'custom',
+      createdAt: 1,
+      updatedAt: 1,
+      lastMessageAt: 1
+    });
+    await repo.upsertThread({
+      id: 't2',
+      title: 'スレッド #8',
+      createdAt: 1,
+      updatedAt: 1,
+      lastMessageAt: 1
+    });
+
+    const title = await repo.reserveNextThreadTitle();
+    expect(title).toBe('スレッド #9');
+  });
+});

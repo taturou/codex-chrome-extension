@@ -25,21 +25,41 @@ function ThreadList(props: {
   currentThreadId?: string;
   onSwitch: (threadId: string) => void;
   onDelete: (threadId: string) => void;
+  onRename: (threadId: string, title: string) => Promise<void>;
 }): JSX.Element {
+  async function openRenameDialog(thread: Thread): Promise<void> {
+    const entered = globalThis.prompt('新しいスレッド名を入力してください', thread.title);
+    if (entered === null) {
+      return;
+    }
+
+    const nextTitle = entered.trim();
+    if (!nextTitle || nextTitle === thread.title) {
+      return;
+    }
+    await props.onRename(thread.id, nextTitle);
+  }
+
   return (
     <div className="threads">
       {props.threads.map((thread) => (
-        <div key={thread.id}>
+        <div key={thread.id} className="thread-row">
           <button
             className={`thread-item ${props.currentThreadId === thread.id ? 'active' : ''}`}
             onClick={() => props.onSwitch(thread.id)}
             type="button"
           >
-            {thread.title}
+            <span>{thread.title}</span>
+            <small className="thread-meta">作成: {formatThreadCreatedAt(thread.createdAt)}</small>
           </button>
-          <button type="button" onClick={() => props.onDelete(thread.id)}>
-            削除
-          </button>
+          <div className="thread-actions">
+            <button type="button" onClick={() => void openRenameDialog(thread)}>
+              名前変更
+            </button>
+            <button type="button" onClick={() => props.onDelete(thread.id)}>
+              削除
+            </button>
+          </div>
         </div>
       ))}
     </div>
@@ -275,6 +295,17 @@ export function App(): JSX.Element {
     await loadThreadsAndMaybeMessages();
   }
 
+  async function renameThread(threadId: string, title: string): Promise<void> {
+    try {
+      await sendCommand({ type: 'RENAME_THREAD', payload: { threadId, title } });
+      await loadThreadsAndMaybeMessages();
+      setStatusReason('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusReason(`スレッド名の変更に失敗: ${message}`);
+    }
+  }
+
   async function attachSelection(): Promise<void> {
     try {
       const tab = await getAttachableActiveTab();
@@ -407,6 +438,7 @@ export function App(): JSX.Element {
           currentThreadId={currentThreadId}
           onSwitch={(id) => void switchThread(id)}
           onDelete={(id) => void deleteThread(id)}
+          onRename={(id, title) => renameThread(id, title)}
         />
         <MessageList messages={currentMessages} />
       </div>
@@ -500,4 +532,8 @@ export function App(): JSX.Element {
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('ja-JP', { hour12: false });
+}
+
+function formatThreadCreatedAt(ts: number): string {
+  return new Date(ts).toLocaleString('ja-JP', { hour12: false });
 }

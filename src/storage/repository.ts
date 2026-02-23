@@ -8,6 +8,18 @@ function now(): number {
   return Date.now();
 }
 
+function extractThreadNumber(title: string): number | undefined {
+  const matched = title.match(/^スレッド #(\d+)$/);
+  if (!matched) {
+    return undefined;
+  }
+  const num = Number.parseInt(matched[1], 10);
+  if (!Number.isFinite(num) || num <= 0) {
+    return undefined;
+  }
+  return num;
+}
+
 function defaultStore(): StorageShape {
   return {
     settings: { wsUrl: DEFAULT_WS_URL },
@@ -76,6 +88,24 @@ export class StorageRepository {
     return store.settings;
   }
 
+  async reserveNextThreadTitle(): Promise<string> {
+    return this.enqueueWrite(async () => {
+      const store = await this.getStore();
+      const inferredNext = store.threads.reduce((max, thread) => {
+        const num = extractThreadNumber(thread.title);
+        if (!num) {
+          return max;
+        }
+        return Math.max(max, num);
+      }, 0) + 1;
+
+      const nextThreadNumber = Math.max(store.meta.nextThreadNumber ?? inferredNext, inferredNext);
+      store.meta.nextThreadNumber = nextThreadNumber + 1;
+      await this.saveStore(store);
+      return `スレッド #${nextThreadNumber}`;
+    });
+  }
+
   async upsertThread(thread: Thread): Promise<Thread> {
     return this.enqueueWrite(async () => {
       const store = await this.getStore();
@@ -111,6 +141,26 @@ export class StorageRepository {
       }
 
       await this.saveStore(store);
+    });
+  }
+
+  async renameThread(threadId: string, title: string): Promise<Thread | undefined> {
+    return this.enqueueWrite(async () => {
+      const store = await this.getStore();
+      const index = store.threads.findIndex((thread) => thread.id === threadId);
+      if (index < 0) {
+        return undefined;
+      }
+
+      const existing = store.threads[index];
+      const updated: Thread = {
+        ...existing,
+        title,
+        updatedAt: now()
+      };
+      store.threads[index] = updated;
+      await this.saveStore(store);
+      return updated;
     });
   }
 

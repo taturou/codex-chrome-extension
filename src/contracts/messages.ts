@@ -12,6 +12,7 @@ export type RuntimeCommand =
   | RuntimeEnvelope<'SEND_CHAT_MESSAGE', { threadId: string; text: string; attachments: Attachment[] }>
   | RuntimeEnvelope<'ATTACH_SELECTION', { tabId?: number }>
   | RuntimeEnvelope<'CREATE_THREAD', { title?: string }>
+  | RuntimeEnvelope<'RENAME_THREAD', { threadId: string; title: string }>
   | RuntimeEnvelope<'SWITCH_THREAD', { threadId: string }>
   | RuntimeEnvelope<'DELETE_THREAD', { threadId: string }>
   | RuntimeEnvelope<'LIST_THREADS', Record<string, never>>

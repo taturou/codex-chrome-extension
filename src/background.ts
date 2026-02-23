@@ -56,10 +56,6 @@ function now(): number {
   return Date.now();
 }
 
-function makeThreadTitle(): string {
-  return `スレッド ${new Date().toLocaleString('ja-JP')}`;
-}
-
 async function broadcast(event: SidePanelEvent): Promise<void> {
   const disconnectedPorts: chrome.runtime.Port[] = [];
 
@@ -219,7 +215,7 @@ async function ensureThread(threadId?: string): Promise<Thread> {
   const createdAt = now();
   const thread: Thread = {
     id: createId('thread'),
-    title: makeThreadTitle(),
+    title: await repository.reserveNextThreadTitle(),
     createdAt,
     updatedAt: createdAt,
     lastMessageAt: createdAt
@@ -396,9 +392,10 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
     }
     case 'CREATE_THREAD': {
       const createdAt = now();
+      const title = command.payload.title?.trim() || (await repository.reserveNextThreadTitle());
       const thread: Thread = {
         id: createId('thread'),
-        title: command.payload.title?.trim() || makeThreadTitle(),
+        title,
         createdAt,
         updatedAt: createdAt,
         lastMessageAt: createdAt
@@ -407,6 +404,17 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
       await repository.setCurrentThread(thread.id);
       const result: CreateThreadResult = { thread };
       return result;
+    }
+    case 'RENAME_THREAD': {
+      const title = command.payload.title.trim();
+      if (!title) {
+        throw new Error('スレッド名は必須です');
+      }
+      const renamed = await repository.renameThread(command.payload.threadId, title);
+      if (!renamed) {
+        throw new Error('対象スレッドが見つかりません');
+      }
+      return { thread: renamed };
     }
     case 'SWITCH_THREAD': {
       await repository.setCurrentThread(command.payload.threadId);
@@ -457,6 +465,7 @@ function isRuntimeCommand(message: unknown): message is RuntimeCommand {
     'SEND_CHAT_MESSAGE',
     'ATTACH_SELECTION',
     'CREATE_THREAD',
+    'RENAME_THREAD',
     'SWITCH_THREAD',
     'DELETE_THREAD',
     'LIST_THREADS',

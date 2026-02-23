@@ -47,5 +47,6 @@ export interface StorageShape {
   messagesByThread: Record<string, Message[]>;
   meta: {
     currentThreadId?: string;
+    nextThreadNumber?: number;
   };
 }
