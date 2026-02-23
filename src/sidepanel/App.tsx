@@ -18,10 +18,110 @@ interface MessagesByThread {
   [threadId: string]: Message[];
 }
 
+interface TokenTimestampByMessage {
+  [messageId: string]: number;
+}
+
+interface MessageErrors {
+  [messageId: string]: string;
+}
+
 type ContextMode = 'chat_only' | 'dom';
+type MessageStatusTone = 'normal' | 'warn' | 'alert' | 'error';
+
+const STREAM_WAIT_WARN_MS = 10_000;
+const STREAM_WAIT_ALERT_MS = 25_000;
+const STREAM_STALE_WARN_MS = 12_000;
 
 function StatusBadge({ status }: { status: WsStatus }): JSX.Element {
   return <span className={`status status-${status}`}>{status}</span>;
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}秒`;
+  }
+  return `${minutes}分${seconds}秒`;
+}
+
+function getAssistantStatusMeta(input: {
+  message: Message;
+  wsStatus: WsStatus;
+  nowTs: number;
+  lastTokenTs?: number;
+  errorText?: string;
+}): { label: string; detail?: string; tone: MessageStatusTone; streaming: boolean } {
+  const { message, wsStatus, nowTs, lastTokenTs, errorText } = input;
+  if (message.status === 'done') {
+    return { label: 'done', tone: 'normal', streaming: false };
+  }
+  if (message.status === 'error') {
+    return {
+      label: 'error',
+      detail: errorText ?? 'Failed to receive response',
+      tone: 'error',
+      streaming: false
+    };
+  }
+  if (message.status === 'pending') {
+    return { label: 'pending', tone: 'warn', streaming: false };
+  }
+
+  const elapsed = nowTs - message.createdAt;
+  const hasContent = message.contentMd.trim().length > 0;
+
+  if (wsStatus === 'disconnected' || wsStatus === 'error') {
+    return {
+      label: 'stopped',
+      detail: `Connection lost (${formatElapsed(elapsed)} elapsed)`,
+      tone: 'error',
+      streaming: true
+    };
+  }
+
+  if (!hasContent) {
+    if (elapsed >= STREAM_WAIT_ALERT_MS) {
+      return {
+        label: 'waiting (delayed)',
+        detail: `${formatElapsed(elapsed)} elapsed. Possible disconnection or error`,
+        tone: 'alert',
+        streaming: true
+      };
+    }
+    if (elapsed >= STREAM_WAIT_WARN_MS) {
+      return {
+        label: 'waiting',
+        detail: `${formatElapsed(elapsed)} elapsed`,
+        tone: 'warn',
+        streaming: true
+      };
+    }
+    return {
+      label: 'waiting',
+      detail: `${formatElapsed(elapsed)} elapsed`,
+      tone: 'normal',
+      streaming: true
+    };
+  }
+
+  const sinceLastToken = nowTs - (lastTokenTs ?? message.createdAt);
+  if (sinceLastToken >= STREAM_STALE_WARN_MS) {
+    return {
+      label: 'streaming (stalled)',
+      detail: `${formatElapsed(sinceLastToken)} since last update`,
+      tone: 'warn',
+      streaming: true
+    };
+  }
+  return {
+    label: 'streaming',
+    detail: `${formatElapsed(sinceLastToken)} since last update`,
+    tone: 'normal',
+    streaming: true
+  };
 }
 
 function ThreadList(props: {
@@ -116,7 +216,13 @@ async function openRenameDialog(
   await onRename(thread.id, nextTitle);
 }
 
-function MessageList({ messages }: { messages: Message[] }): JSX.Element {
+function MessageList(props: {
+  messages: Message[];
+  wsStatus: WsStatus;
+  nowTs: number;
+  tokenTimestampByMessage: TokenTimestampByMessage;
+  messageErrors: MessageErrors;
+}): JSX.Element {
   function toDisplayMarkdown(message: Message): string {
     const body = message.contentMd.trim();
     const attachments = (message.attachments ?? [])
@@ -135,7 +241,7 @@ function MessageList({ messages }: { messages: Message[] }): JSX.Element {
     return `${body}\n\n---\n\n${attachments}`;
   }
 
-  if (messages.length === 0) {
+  if (props.messages.length === 0) {
     return (
       <div className="messages-empty">
         <strong>メッセージがありません</strong>
@@ -146,16 +252,39 @@ function MessageList({ messages }: { messages: Message[] }): JSX.Element {
 
   return (
     <div className="messages">
-      {messages.map((message) => (
-        <article key={message.id} className={`message ${message.role}`}>
-          <header>
-            <strong>{message.role}</strong> / {message.status}
-          </header>
-          <div className="message-content">
-            <SafeMarkdown markdown={toDisplayMarkdown(message)} />
-          </div>
-        </article>
-      ))}
+      {props.messages.map((message) => {
+        const statusMeta =
+          message.role === 'assistant'
+            ? getAssistantStatusMeta({
+                message,
+                wsStatus: props.wsStatus,
+                nowTs: props.nowTs,
+                lastTokenTs: props.tokenTimestampByMessage[message.id],
+                errorText: props.messageErrors[message.id]
+              })
+            : {
+                label: message.status,
+                detail: undefined,
+                tone: 'normal' as const,
+                streaming: false
+              };
+
+        return (
+          <article key={message.id} className={`message ${message.role}`}>
+            <header className="message-header">
+              <strong>{message.role}</strong>
+              <span className={`message-status message-status-${statusMeta.tone}`}>
+                {statusMeta.streaming ? <span className="message-status-dot" aria-hidden="true" /> : null}
+                {statusMeta.label}
+              </span>
+            </header>
+            {statusMeta.detail ? <small className="message-status-detail">{statusMeta.detail}</small> : null}
+            <div className="message-content">
+              <SafeMarkdown markdown={toDisplayMarkdown(message)} />
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -224,6 +353,9 @@ export function App(): JSX.Element {
   const [contextMode, setContextMode] = useState<ContextMode>('chat_only');
   const [domSelectionActive, setDomSelectionActive] = useState(false);
   const [domSelectionCount, setDomSelectionCount] = useState(0);
+  const [tokenTimestampByMessage, setTokenTimestampByMessage] = useState<TokenTimestampByMessage>({});
+  const [messageErrors, setMessageErrors] = useState<MessageErrors>({});
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   const currentMessages = useMemo(() => {
     if (!currentThreadId) {
@@ -234,6 +366,11 @@ export function App(): JSX.Element {
 
   const hasThread = Boolean(currentThreadId);
   const isConnected = status === 'connected';
+  const hasStreamingMessage = useMemo(
+    () => currentMessages.some((msg) => msg.role === 'assistant' && msg.status === 'streaming'),
+    [currentMessages]
+  );
+  const chatStalledByConnection = hasStreamingMessage && status !== 'connected';
   const contextArmed = contextMode !== 'chat_only';
   const hasAnyContentForSend = Boolean(input.trim() || pendingAttachments.length > 0 || contextArmed);
   const composerDisabled = !hasThread || !isConnected;
@@ -250,6 +387,16 @@ export function App(): JSX.Element {
     }
     return 'メッセージを入力';
   }, [hasThread, isConnected]);
+
+  useEffect(() => {
+    if (!hasStreamingMessage) {
+      return;
+    }
+    const id = globalThis.setInterval(() => {
+      setNowTs(Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  }, [hasStreamingMessage]);
 
   useEffect(() => {
     function onGlobalKeyDown(event: globalThis.KeyboardEvent): void {
@@ -317,6 +464,8 @@ export function App(): JSX.Element {
 
     if (event.type === 'CHAT_TOKEN') {
       const { threadId, messageId, token } = event.payload;
+      setTokenTimestampByMessage((prev) => ({ ...prev, [messageId]: Date.now() }));
+      setNowTs(Date.now());
       setMessagesByThread((prev) => {
         const current = prev[threadId] ?? [];
         const next = current.map((msg) =>
@@ -335,6 +484,11 @@ export function App(): JSX.Element {
 
     if (event.type === 'CHAT_DONE') {
       const { threadId, messageId } = event.payload;
+      setTokenTimestampByMessage((prev) => {
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
       setMessagesByThread((prev) => {
         const current = prev[threadId] ?? [];
         const next = current.map((msg) => (msg.id === messageId ? { ...msg, status: 'done' as const } : msg));
@@ -344,7 +498,13 @@ export function App(): JSX.Element {
     }
 
     if (event.type === 'CHAT_ERROR') {
-      const { threadId, messageId } = event.payload;
+      const { threadId, messageId, error } = event.payload;
+      setMessageErrors((prev) => ({ ...prev, [messageId]: error }));
+      setTokenTimestampByMessage((prev) => {
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
       setMessagesByThread((prev) => {
         const current = prev[threadId] ?? [];
         const next = current.map((msg) => (msg.id === messageId ? { ...msg, status: 'error' as const } : msg));
@@ -722,7 +882,20 @@ export function App(): JSX.Element {
               onRename={(id, title) => renameThread(id, title)}
             />
             <section className="chat-panel" aria-label="チャット">
-              <MessageList messages={currentMessages} />
+              <div className="chat-timeline">
+                {chatStalledByConnection ? (
+                  <div className="chat-warning">
+                    Connection became unstable during streaming. The reply may not complete until reconnect.
+                  </div>
+                ) : null}
+                <MessageList
+                  messages={currentMessages}
+                  wsStatus={status}
+                  nowTs={nowTs}
+                  tokenTimestampByMessage={tokenTimestampByMessage}
+                  messageErrors={messageErrors}
+                />
+              </div>
 
               {pendingAttachments.length > 0 ? (
                 <div className="pending-attachments">

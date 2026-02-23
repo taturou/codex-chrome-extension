@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Codex Side Panel Chat",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Codex app-server と連携するサイドパネルチャット",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting", "tabs", "permissions"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],

@@ -257,6 +257,23 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+.chat-timeline {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+}
+
+.chat-warning {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+}
+
 .messages,
 .messages-empty {
   overflow: auto;
@@ -287,6 +304,67 @@ textarea:focus-visible {
 
 .message.assistant {
   background: #f8fafc;
+}
+
+.message-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.message-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  border: 1px solid #94a3b8;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  padding: 2px 8px;
+}
+
+.message-status-normal {
+  border-color: #475569;
+}
+
+.message-status-warn {
+  border-color: #b45309;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.message-status-alert,
+.message-status-error {
+  border-color: #b91c1c;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.message-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.message-status-detail {
+  display: block;
+  color: #64748b;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .composer {
