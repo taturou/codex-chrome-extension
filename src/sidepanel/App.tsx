@@ -23,54 +23,103 @@ function StatusBadge({ status }: { status: WsStatus }): JSX.Element {
 function ThreadList(props: {
   threads: Thread[];
   currentThreadId?: string;
+  onCreate: () => void;
   onSwitch: (threadId: string) => void;
   onDelete: (threadId: string) => void;
   onRename: (threadId: string, title: string) => Promise<void>;
 }): JSX.Element {
-  async function openRenameDialog(thread: Thread): Promise<void> {
-    const entered = globalThis.prompt('新しいスレッド名を入力してください', thread.title);
-    if (entered === null) {
-      return;
-    }
+  const [query, setQuery] = useState('');
 
-    const nextTitle = entered.trim();
-    if (!nextTitle || nextTitle === thread.title) {
-      return;
+  const filteredThreads = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      return props.threads;
     }
-    await props.onRename(thread.id, nextTitle);
-  }
+    return props.threads.filter((thread) => thread.title.toLowerCase().includes(q));
+  }, [props.threads, query]);
 
   return (
-    <div className="threads">
-      {props.threads.map((thread) => (
-        <div key={thread.id} className="thread-row">
-          <button
-            className={`thread-item ${props.currentThreadId === thread.id ? 'active' : ''}`}
-            onClick={() => props.onSwitch(thread.id)}
-            type="button"
-          >
-            <span>{thread.title}</span>
-            <small className="thread-meta">作成: {formatThreadCreatedAt(thread.createdAt)}</small>
-          </button>
-          <div className="thread-actions">
-            <button type="button" onClick={() => void openRenameDialog(thread)}>
-              名前変更
-            </button>
-            <button type="button" onClick={() => props.onDelete(thread.id)}>
-              削除
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
+    <section className="threads-panel" aria-label="スレッド">
+      <div className="threads-panel-header">
+        <h2>Threads</h2>
+        <button type="button" onClick={props.onCreate} className="primary-button">
+          新規
+        </button>
+      </div>
+
+      <input
+        aria-label="スレッド検索"
+        className="threads-search"
+        placeholder="スレッド検索"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+
+      <div className="threads">
+        {filteredThreads.length === 0 ? (
+          <small className="thread-empty">一致するスレッドがありません</small>
+        ) : (
+          filteredThreads.map((thread) => (
+            <div key={thread.id} className="thread-row">
+              <button
+                className={`thread-item ${props.currentThreadId === thread.id ? 'active' : ''}`}
+                onClick={() => props.onSwitch(thread.id)}
+                type="button"
+              >
+                <span>{thread.title}</span>
+                <small className="thread-meta">更新: {formatThreadUpdatedAt(thread.updatedAt)}</small>
+              </button>
+              <div className="thread-actions">
+                <button
+                  type="button"
+                  className="thread-rename"
+                  onClick={() => void openRenameDialog(thread, props.onRename)}
+                  aria-label={`スレッド ${thread.title} の名前を変更`}
+                >
+                  変更
+                </button>
+                <button
+                  type="button"
+                  className="thread-delete"
+                  onClick={() => props.onDelete(thread.id)}
+                  aria-label={`スレッド ${thread.title} を削除`}
+                >
+                  削除
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
   );
+}
+
+async function openRenameDialog(
+  thread: Thread,
+  onRename: (threadId: string, title: string) => Promise<void>
+): Promise<void> {
+  const entered = globalThis.prompt('新しいスレッド名を入力してください', thread.title);
+  if (entered === null) {
+    return;
+  }
+
+  const nextTitle = entered.trim();
+  if (!nextTitle || nextTitle === thread.title) {
+    return;
+  }
+
+  await onRename(thread.id, nextTitle);
 }
 
 function MessageList({ messages }: { messages: Message[] }): JSX.Element {
   function toDisplayMarkdown(message: Message): string {
     const body = message.contentMd.trim();
     const attachments = (message.attachments ?? [])
-      .map((item, index) => `### 添付 ${index + 1}\n\n${item.text}`)
+      .map((item, index) => {
+        const source = item.url ? `出典URL: ${item.url}\n\n` : '';
+        return `### 添付 ${index + 1}\n\n${source}${item.text}`;
+      })
       .join('\n\n');
 
     if (!attachments) {
@@ -80,6 +129,15 @@ function MessageList({ messages }: { messages: Message[] }): JSX.Element {
       return attachments;
     }
     return `${body}\n\n---\n\n${attachments}`;
+  }
+
+  if (messages.length === 0) {
+    return (
+      <div className="messages-empty">
+        <strong>メッセージがありません</strong>
+        <small>下の入力欄からチャットを開始してください</small>
+      </div>
+    );
   }
 
   return (
@@ -150,6 +208,7 @@ export function App(): JSX.Element {
   const [wsUrl, setWsUrl] = useState('');
   const [wsLogs, setWsLogs] = useState<WsDebugLogEntry[]>([]);
   const [copyNotice, setCopyNotice] = useState('');
+  const [devMode, setDevMode] = useState(false);
 
   const currentMessages = useMemo(() => {
     if (!currentThreadId) {
@@ -164,16 +223,30 @@ export function App(): JSX.Element {
 
   const composerPlaceholder = useMemo(() => {
     if (!hasThread && !isConnected) {
-      return '先に「新規スレッド」を作成し、WSに接続してください';
+      return '先に接続し、スレッドを作成してください';
     }
     if (!hasThread) {
-      return '先に「新規スレッド」を作成してください';
+      return '先にスレッドを作成してください';
     }
     if (!isConnected) {
       return '送信するにはWS接続が必要です';
     }
-    return 'メッセージ';
+    return 'メッセージを入力';
   }, [hasThread, isConnected]);
+
+  useEffect(() => {
+    function onGlobalKeyDown(event: globalThis.KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        setDevMode((prev) => !prev);
+      }
+    }
+
+    globalThis.addEventListener('keydown', onGlobalKeyDown);
+    return () => {
+      globalThis.removeEventListener('keydown', onGlobalKeyDown);
+    };
+  }, []);
 
   async function loadThreadsAndMaybeMessages(): Promise<void> {
     const list = await sendCommand<ListThreadsResult>({ type: 'LIST_THREADS', payload: {} });
@@ -291,6 +364,12 @@ export function App(): JSX.Element {
   }
 
   async function deleteThread(threadId: string): Promise<void> {
+    const target = threads.find((item) => item.id === threadId);
+    const ok = globalThis.confirm(`スレッド「${target?.title ?? threadId}」を削除します。`);
+    if (!ok) {
+      return;
+    }
+
     await sendCommand({ type: 'DELETE_THREAD', payload: { threadId } });
     await loadThreadsAndMaybeMessages();
   }
@@ -365,8 +444,14 @@ export function App(): JSX.Element {
   }
 
   async function connectWs(): Promise<void> {
-    await sendCommand({ type: 'CONNECT_WS', payload: { url: wsUrl } });
-    await loadWsStatus();
+    try {
+      await sendCommand({ type: 'CONNECT_WS', payload: { url: wsUrl } });
+      await loadWsStatus();
+      setStatusReason('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusReason(`接続に失敗: ${message}`);
+    }
   }
 
   async function disconnectWs(): Promise<void> {
@@ -382,6 +467,7 @@ export function App(): JSX.Element {
 
   async function saveSettings(): Promise<void> {
     await sendCommand({ type: 'SAVE_SETTINGS', payload: { wsUrl } });
+    setStatusReason('接続URLを保存しました');
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -391,8 +477,9 @@ export function App(): JSX.Element {
     }
   }
 
-  async function copyWsLogs(): Promise<void> {
-    const text = wsLogs
+  async function copyWsLogs(mode: 'all' | 'latest'): Promise<void> {
+    const target = mode === 'latest' ? wsLogs.slice(-1) : wsLogs;
+    const text = target
       .map((entry) => {
         const time = formatTime(entry.ts);
         const detail = entry.detail ? `\n${entry.detail}` : '';
@@ -402,7 +489,7 @@ export function App(): JSX.Element {
 
     try {
       await navigator.clipboard.writeText(text || 'ログなし');
-      setCopyNotice('コピーしました');
+      setCopyNotice(mode === 'latest' ? '最新ログをコピーしました' : '全ログをコピーしました');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setCopyNotice(`コピー失敗: ${message}`);
@@ -411,121 +498,150 @@ export function App(): JSX.Element {
 
   return (
     <div className="app">
-      <div className="header">
-        <strong>Codex Chat</strong>
-        <StatusBadge status={status} />
-        {statusReason ? <small>{statusReason}</small> : null}
-      </div>
+      <header className="header">
+        <div className="header-main">
+          <strong>Codex Chat</strong>
+          <StatusBadge status={status} />
+        </div>
+        <div className="header-actions">
+          {isConnected ? (
+            <button type="button" onClick={() => void disconnectWs()}>
+              切断
+            </button>
+          ) : (
+            <button type="button" onClick={() => void connectWs()} className="primary-button">
+              接続
+            </button>
+          )}
+        </div>
+      </header>
 
-      <div className="toolbar">
-        <button type="button" onClick={() => void createThread()}>
-          新規スレッド
-        </button>
-        <button type="button" onClick={() => void connectWs()}>
-          再接続
-        </button>
-        <button type="button" onClick={() => void disconnectWs()}>
-          切断
-        </button>
-        <button type="button" onClick={() => void attachSelection()}>
-          選択を添付
-        </button>
-      </div>
+      {statusReason ? <p className="status-reason">{statusReason}</p> : null}
 
-      <div className="main">
-        <ThreadList
-          threads={threads}
-          currentThreadId={currentThreadId}
-          onSwitch={(id) => void switchThread(id)}
-          onDelete={(id) => void deleteThread(id)}
-          onRename={(id, title) => renameThread(id, title)}
-        />
-        <MessageList messages={currentMessages} />
-      </div>
+      {!isConnected ? (
+        <section className="connection-gate" aria-label="接続設定">
+          <h2>接続設定</h2>
+          <label>
+            Codex app-server URL
+            <input value={wsUrl} onChange={(event) => setWsUrl(event.target.value)} placeholder="ws://127.0.0.1:4317" />
+          </label>
+          <div className="connection-gate-actions">
+            <button type="button" onClick={() => void saveSettings()}>
+              URL保存
+            </button>
+            <button type="button" onClick={() => void connectWs()} className="primary-button">
+              接続
+            </button>
+          </div>
+          <small>接続後にスレッドとチャットが表示されます。</small>
+        </section>
+      ) : (
+        <>
+          <div className="main">
+            <ThreadList
+              threads={threads}
+              currentThreadId={currentThreadId}
+              onCreate={() => void createThread()}
+              onSwitch={(id) => void switchThread(id)}
+              onDelete={(id) => void deleteThread(id)}
+              onRename={(id, title) => renameThread(id, title)}
+            />
+            <section className="chat-panel" aria-label="チャット">
+              <MessageList messages={currentMessages} />
 
-      <div className="composer">
-        <label>
-          WS URL:
-          <input value={wsUrl} onChange={(event) => setWsUrl(event.target.value)} />
-          <button type="button" onClick={() => void saveSettings()}>
-            URL保存
-          </button>
-        </label>
+              {pendingAttachments.length > 0 ? (
+                <div className="pending-attachments">
+                  <div className="attachments">添付候補（次の送信に同梱）</div>
+                  <div className="pending-attachment-list">
+                    {pendingAttachments.map((item, index) => (
+                      <div key={`${item.capturedAt}-${index}`} className="pending-attachment-item">
+                        <div>
+                          <small>{item.url}</small>
+                          <span>{item.text}</span>
+                        </div>
+                        <button type="button" onClick={() => removePendingAttachment(index)}>
+                          削除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
-        {pendingAttachments.length > 0 ? (
-          <div className="pending-attachments">
-            <div className="attachments">添付候補（次の送信に同梱されます）</div>
-            <small>Enterで本文+添付送信 / 「添付のみ送信」で本文なし送信</small>
-            <div className="pending-attachment-list">
-              {pendingAttachments.map((item, index) => (
-                <div key={`${item.capturedAt}-${index}`} className="pending-attachment-item">
-                  <span>{item.text}</span>
-                  <button type="button" onClick={() => removePendingAttachment(index)}>
-                    ×
+              <div className="composer">
+                <textarea
+                  placeholder={composerPlaceholder}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={onComposerKeyDown}
+                  disabled={composerDisabled}
+                />
+
+                <div className="composer-actions">
+                  <div className="composer-left-actions">
+                    <button type="button" onClick={() => void attachSelection()} disabled={!isConnected}>
+                      現在ページの選択範囲を添付
+                    </button>
+                    <small>Enter送信 / Shift+Enter改行</small>
+                  </div>
+
+                  <div className="composer-buttons">
+                    <button
+                      type="button"
+                      onClick={() => void sendAttachmentsOnly()}
+                      disabled={composerDisabled || pendingAttachments.length === 0}
+                    >
+                      添付のみ送信
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void sendMessage()}
+                      className="primary-button"
+                      disabled={composerDisabled || (!input.trim() && pendingAttachments.length === 0)}
+                    >
+                      送信
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {devMode ? (
+            <section className="ws-debug-log" aria-label="WSデバッグログ">
+              <div className="ws-debug-log-header">
+                <strong>WSログ</strong>
+                <div className="ws-debug-log-actions">
+                  <button type="button" onClick={() => void copyWsLogs('latest')}>
+                    最新をコピー
+                  </button>
+                  <button type="button" onClick={() => void copyWsLogs('all')}>
+                    全件をコピー
+                  </button>
+                  <button type="button" onClick={() => setWsLogs([])}>
+                    クリア
                   </button>
                 </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <textarea
-          placeholder={composerPlaceholder}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={onComposerKeyDown}
-          disabled={composerDisabled}
-        />
-
-        <div className="composer-actions">
-          <small>Enter送信 / Shift+Enter改行</small>
-          <div className="composer-buttons">
-            <button
-              type="button"
-              onClick={() => void sendAttachmentsOnly()}
-              disabled={composerDisabled || pendingAttachments.length === 0}
-            >
-              添付のみ送信
-            </button>
-            <button
-              type="button"
-              onClick={() => void sendMessage()}
-              disabled={composerDisabled || (!input.trim() && pendingAttachments.length === 0)}
-            >
-              送信
-            </button>
-          </div>
-        </div>
-
-        <div className="ws-debug-log">
-          <div className="ws-debug-log-header">
-            <strong>WSログ</strong>
-            <div className="ws-debug-log-actions">
-              <button type="button" onClick={() => void copyWsLogs()}>
-                コピー
-              </button>
-              <button type="button" onClick={() => setWsLogs([])}>
-                クリア
-              </button>
-            </div>
-          </div>
-          {copyNotice ? <small>{copyNotice}</small> : null}
-          <div className="ws-debug-log-body">
-            {wsLogs.length === 0 ? (
-              <small>ログなし</small>
-            ) : (
-              wsLogs.map((entry, index) => (
-                <div key={`${entry.ts}-${index}`} className={`ws-log-entry ${entry.category}`}>
-                  <span className="ts">{formatTime(entry.ts)}</span>
-                  <span className="cat">[{entry.category}]</span>
-                  <span className="msg">{entry.message}</span>
-                  {entry.detail ? <pre className="detail">{entry.detail}</pre> : null}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
+              </div>
+              {copyNotice ? <small>{copyNotice}</small> : null}
+              <div className="ws-debug-log-body">
+                {wsLogs.length === 0 ? (
+                  <small>ログなし</small>
+                ) : (
+                  wsLogs.map((entry, index) => (
+                    <div key={`${entry.ts}-${index}`} className={`ws-log-entry ${entry.category}`}>
+                      <span className="ts">{formatTime(entry.ts)}</span>
+                      <span className="cat">[{entry.category}]</span>
+                      <span className="msg">{entry.message}</span>
+                      {entry.detail ? <pre className="detail">{entry.detail}</pre> : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -534,6 +650,6 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('ja-JP', { hour12: false });
 }
 
-function formatThreadCreatedAt(ts: number): string {
+function formatThreadUpdatedAt(ts: number): string {
   return new Date(ts).toLocaleString('ja-JP', { hour12: false });
 }

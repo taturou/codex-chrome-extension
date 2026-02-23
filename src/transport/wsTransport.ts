@@ -584,8 +584,7 @@ function buildInputText(text: string, attachments: Attachment[]): string {
     if (attachment.type !== 'selected_text') {
       continue;
     }
-    const header = attachment.url ? `選択テキスト (${attachment.url})` : '選択テキスト';
-    parts.push(`${header}\n${attachment.text}`);
+    parts.push(`選択テキスト\n${attachment.text}`);
   }
 
   return parts.join('\n\n');
