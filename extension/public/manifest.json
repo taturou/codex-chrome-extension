@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Codex Side Panel",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Side panel chat extension for Codex app-server",
   "permissions": [
     "sidePanel",
@@ -12,6 +12,13 @@
     "permissions"
   ],
   "optional_host_permissions": [
+    "http://sw-ci-emcos-sdk:8086/*",
+    "https://chatgpt.com/*",
+    "https://engage.cloud.microsoft/*",
+    "https://esol1975.sharepoint.com/*",
+    "https://github.com/emcos-sdk/*",
+    "https://loop.cloud.microsoft/*",
+    "https://outlook.cloud.microsoft/*",
     "https://pjp.esol.co.jp/epw/*",
     "https://teams.cloud.microsoft/*"
   ],
