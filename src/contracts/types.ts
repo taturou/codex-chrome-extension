@@ -66,6 +66,13 @@ export interface Thread {
   lastMessageAt: number;
 }
 
+export interface ThreadArchive {
+  format: 'codex-thread-v1';
+  exportedAt: number;
+  thread: Thread;
+  messages: Message[];
+}
+
 export interface StorageShape {
   settings: Setting;
   threads: Thread[];

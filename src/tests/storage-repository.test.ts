@@ -238,3 +238,72 @@ describe('StorageRepository reserveNextThreadTitle', () => {
     expect(title).toBe('Thread #9');
   });
 });
+
+describe('StorageRepository export/import', () => {
+  beforeEach(() => {
+    const local = createChromeStorageMock();
+    vi.stubGlobal('chrome', {
+      storage: { local }
+    });
+  });
+
+  it('指定スレッドをアーカイブとしてエクスポートできる', async () => {
+    const repo = new StorageRepository();
+    await repo.upsertThread({
+      id: 't1',
+      title: 'Thread A',
+      createdAt: 1,
+      updatedAt: 2,
+      lastMessageAt: 2
+    });
+    await repo.appendMessage({
+      id: 'm1',
+      threadId: 't1',
+      role: 'user',
+      contentMd: 'hello',
+      createdAt: 1,
+      status: 'done'
+    });
+
+    const result = await repo.exportThreads(['t1', 'missing']);
+    expect(result.archives).toHaveLength(1);
+    expect(result.archives[0].format).toBe('codex-thread-v1');
+    expect(result.archives[0].thread.id).toBe('t1');
+    expect(result.archives[0].messages).toHaveLength(1);
+    expect(result.missingThreadIds).toEqual(['missing']);
+  });
+
+  it('アーカイブをインポートしてスレッド/メッセージを復元できる', async () => {
+    const repo = new StorageRepository();
+    const imported = await repo.importThreads([
+      {
+        format: 'codex-thread-v1',
+        exportedAt: 100,
+        thread: {
+          id: 't-import',
+          title: 'Imported Thread',
+          createdAt: 10,
+          updatedAt: 20,
+          lastMessageAt: 20
+        },
+        messages: [
+          {
+            id: 'm-import',
+            threadId: 't-import',
+            role: 'assistant',
+            contentMd: 'restored',
+            createdAt: 11,
+            status: 'done'
+          }
+        ]
+      }
+    ]);
+
+    expect(imported.importedCount).toBe(1);
+    const threads = await repo.listThreads();
+    expect(threads.some((thread) => thread.id === 't-import')).toBe(true);
+    const messages = await repo.getThreadMessages('t-import');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].contentMd).toBe('restored');
+  });
+});

@@ -1,4 +1,4 @@
-import type { Attachment, Message, Setting, Thread, UsageLimits, WsDebugLogEntry, WsStatus } from './types';
+import type { Attachment, Message, Setting, Thread, ThreadArchive, UsageLimits, WsDebugLogEntry, WsStatus } from './types';
 
 export interface RuntimeEnvelope<T extends string, P> {
   type: T;
@@ -22,6 +22,8 @@ export type RuntimeCommand =
   | RuntimeEnvelope<'DELETE_THREAD', { threadId: string }>
   | RuntimeEnvelope<'LIST_THREADS', Record<string, never>>
   | RuntimeEnvelope<'GET_THREAD_MESSAGES', { threadId: string }>
+  | RuntimeEnvelope<'EXPORT_THREADS', { threadIds: string[] }>
+  | RuntimeEnvelope<'IMPORT_THREADS', { archives: ThreadArchive[] }>
   | RuntimeEnvelope<'GET_USAGE_LIMITS', Record<string, never>>
   | RuntimeEnvelope<'REFRESH_USAGE_LIMITS', Record<string, never>>
   | RuntimeEnvelope<'SAVE_SETTINGS', { wsUrl: string }>
@@ -31,6 +33,7 @@ export type SidePanelEvent =
   | RuntimeEnvelope<'WS_STATUS_CHANGED', { status: WsStatus; reason?: string }>
   | RuntimeEnvelope<'WS_DEBUG_LOG', { entry: WsDebugLogEntry }>
   | RuntimeEnvelope<'USAGE_LIMITS_UPDATED', { usage: UsageLimits }>
+  | RuntimeEnvelope<'THREADS_UPDATED', { reason: 'import_threads' }>
   | RuntimeEnvelope<'CHAT_TOKEN', { threadId: string; messageId: string; token: string }>
   | RuntimeEnvelope<'CHAT_DONE', { threadId: string; messageId: string }>
   | RuntimeEnvelope<'CHAT_ERROR', { threadId: string; messageId: string; error: string }>
@@ -49,6 +52,15 @@ export interface ListThreadsResult {
 
 export interface MessagesResult {
   messages: Message[];
+}
+
+export interface ExportThreadsResult {
+  archives: ThreadArchive[];
+  missingThreadIds: string[];
+}
+
+export interface ImportThreadsResult {
+  importedCount: number;
 }
 
 export interface SettingsResult {

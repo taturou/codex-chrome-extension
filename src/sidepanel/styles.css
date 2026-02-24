@@ -145,6 +145,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.danger-button {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #ffffff;
+}
+
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
@@ -606,6 +612,53 @@ textarea {
   color: #e2e8f0;
   border-radius: 4px;
   padding: 4px;
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.52);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+}
+
+.confirm-dialog {
+  width: min(440px, calc(100vw - 32px));
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.confirm-dialog h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.confirm-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.confirm-note {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+}
+
+.confirm-notice {
+  margin: 0;
+  color: #0f766e;
+  font-size: 13px;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .attachments {

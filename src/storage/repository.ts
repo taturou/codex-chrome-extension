@@ -1,4 +1,4 @@
-import type { Message, Setting, StorageShape, Thread } from '../contracts/types';
+import type { Message, Setting, StorageShape, Thread, ThreadArchive } from '../contracts/types';
 import { MAX_MESSAGES_PER_THREAD, MAX_THREADS, DEFAULT_WS_URL } from '../shared/constants';
 import { enforceMessageLimit, enforceThreadLimit } from './limits';
 
@@ -190,6 +190,73 @@ export class StorageRepository {
   async getThreadMessages(threadId: string): Promise<Message[]> {
     const store = await this.getStore();
     return store.messagesByThread[threadId] ?? [];
+  }
+
+  async exportThreads(threadIds: string[]): Promise<{ archives: ThreadArchive[]; missingThreadIds: string[] }> {
+    const store = await this.getStore();
+    const byId = new Map(store.threads.map((thread) => [thread.id, thread]));
+    const archives: ThreadArchive[] = [];
+    const missingThreadIds: string[] = [];
+
+    for (const threadId of threadIds) {
+      const thread = byId.get(threadId);
+      if (!thread) {
+        missingThreadIds.push(threadId);
+        continue;
+      }
+      archives.push({
+        format: 'codex-thread-v1',
+        exportedAt: now(),
+        thread,
+        messages: store.messagesByThread[threadId] ?? []
+      });
+    }
+
+    return { archives, missingThreadIds };
+  }
+
+  async importThreads(archives: ThreadArchive[]): Promise<{ importedCount: number }> {
+    return this.enqueueWrite(async () => {
+      const store = await this.getStore();
+      const nextThreads = [...store.threads];
+      const nextMessagesByThread = { ...store.messagesByThread };
+      let importedCount = 0;
+
+      for (const archive of archives) {
+        if (archive.format !== 'codex-thread-v1') {
+          continue;
+        }
+
+        const thread = archive.thread;
+        if (!thread?.id) {
+          continue;
+        }
+
+        const existingIndex = nextThreads.findIndex((item) => item.id === thread.id);
+        if (existingIndex >= 0) {
+          nextThreads[existingIndex] = thread;
+        } else {
+          nextThreads.push(thread);
+        }
+
+        nextMessagesByThread[thread.id] = enforceMessageLimit(
+          Array.isArray(archive.messages) ? archive.messages : [],
+          MAX_MESSAGES_PER_THREAD
+        );
+        importedCount += 1;
+      }
+
+      const enforced = enforceThreadLimit(nextThreads, nextMessagesByThread, MAX_THREADS);
+      store.threads = enforced.threads;
+      store.messagesByThread = enforced.messagesByThread;
+
+      if (!store.meta.currentThreadId || enforced.removedThreadIds.includes(store.meta.currentThreadId)) {
+        store.meta.currentThreadId = store.threads[0]?.id;
+      }
+
+      await this.saveStore(store);
+      return { importedCount };
+    });
   }
 
   async appendMessage(message: Message): Promise<Message> {

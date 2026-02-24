@@ -2,6 +2,8 @@ import type {
   ApiResponse,
   AttachSelectionResult,
   CreateThreadResult,
+  ExportThreadsResult,
+  ImportThreadsResult,
   UsageLimitsResult,
   ListThreadsResult,
   MessagesResult,
@@ -1001,6 +1003,18 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
       const result: MessagesResult = { messages };
       return result;
     }
+    case 'EXPORT_THREADS': {
+      const result: ExportThreadsResult = await repository.exportThreads(command.payload.threadIds);
+      return result;
+    }
+    case 'IMPORT_THREADS': {
+      const result: ImportThreadsResult = await repository.importThreads(command.payload.archives);
+      await broadcast({
+        type: 'THREADS_UPDATED',
+        payload: { reason: 'import_threads' }
+      });
+      return result;
+    }
     case 'SAVE_SETTINGS': {
       const wsUrl = command.payload.wsUrl.trim() || DEFAULT_WS_URL;
       const settings = await repository.saveSettings({ wsUrl });
@@ -1043,6 +1057,8 @@ function isRuntimeCommand(message: unknown): message is RuntimeCommand {
     'DELETE_THREAD',
     'LIST_THREADS',
     'GET_THREAD_MESSAGES',
+    'EXPORT_THREADS',
+    'IMPORT_THREADS',
     'SAVE_SETTINGS',
     'GET_SETTINGS'
   ].includes(type);

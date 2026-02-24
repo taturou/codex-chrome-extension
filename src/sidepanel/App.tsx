@@ -4,6 +4,7 @@ import type {
   CapturePageContextResult,
   CreateThreadResult,
   DomSelectionStateResult,
+  ExportThreadsResult,
   ListThreadsResult,
   MessagesResult,
   SettingsResult,
@@ -215,7 +216,7 @@ function ThreadList(props: {
   currentThreadId?: string;
   onCreate: () => void;
   onSwitch: (threadId: string) => void;
-  onDelete: (threadId: string) => void;
+  onDeleteRequest: (thread: Thread) => void;
   onRename: (threadId: string, title: string) => Promise<void>;
 }): JSX.Element {
   const [query, setQuery] = useState('');
@@ -271,7 +272,7 @@ function ThreadList(props: {
                 <button
                   type="button"
                   className="thread-delete"
-                  onClick={() => props.onDelete(thread.id)}
+                  onClick={() => props.onDeleteRequest(thread)}
                   aria-label={`Delete thread ${thread.title}`}
                 >
                   Delete
@@ -438,6 +439,40 @@ function attachmentSummary(attachment: Attachment): string {
   return `Page context (${scope})`;
 }
 
+function sanitizeFilePart(input: string): string {
+  return input
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 80);
+}
+
+function formatDateForFile(ts: number): string {
+  const date = new Date(ts);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  const second = String(date.getSeconds()).padStart(2, '0');
+  return `${year}${month}${day}-${hour}${minute}${second}`;
+}
+
+function threadFileName(thread: Thread, exportedAt: number): string {
+  const title = sanitizeFilePart(thread.title || 'thread');
+  const id = sanitizeFilePart(thread.id);
+  return `${formatDateForFile(exportedAt)}_${title}_${id}.json`;
+}
+
+function triggerDownload(fileName: string, content: string): void {
+  const blob = new Blob([content], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function App(): JSX.Element {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string>();
@@ -457,6 +492,9 @@ export function App(): JSX.Element {
   const [messageErrors, setMessageErrors] = useState<MessageErrors>({});
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
+  const [deleteTargetThread, setDeleteTargetThread] = useState<Thread>();
+  const [deleteDialogNotice, setDeleteDialogNotice] = useState('');
+  const [isDeleteActionRunning, setIsDeleteActionRunning] = useState(false);
   const [usageLimits, setUsageLimits] = useState<UsageLimits>({
     rateLimits: [],
     updatedAt: 0
@@ -641,6 +679,11 @@ export function App(): JSX.Element {
       return;
     }
 
+    if (event.type === 'THREADS_UPDATED') {
+      void loadThreadsAndMaybeMessages();
+      return;
+    }
+
     if (event.type === 'SELECTION_ATTACHED') {
       setPendingAttachments((prev) => [...prev, event.payload.attachment]);
       return;
@@ -725,15 +768,51 @@ export function App(): JSX.Element {
     setMessagesByThread((prev) => ({ ...prev, [threadId]: res.messages }));
   }
 
-  async function deleteThread(threadId: string): Promise<void> {
-    const target = threads.find((item) => item.id === threadId);
-    const ok = globalThis.confirm(`Delete thread "${target?.title ?? threadId}"?`);
-    if (!ok) {
+  function openDeleteDialog(thread: Thread): void {
+    setDeleteTargetThread(thread);
+    setDeleteDialogNotice('');
+  }
+
+  function closeDeleteDialog(): void {
+    if (isDeleteActionRunning) {
       return;
     }
+    setDeleteTargetThread(undefined);
+    setDeleteDialogNotice('');
+  }
 
-    await sendCommand({ type: 'DELETE_THREAD', payload: { threadId } });
-    await loadThreadsAndMaybeMessages();
+  async function saveThreadBeforeDelete(thread: Thread): Promise<void> {
+    setIsDeleteActionRunning(true);
+    setDeleteDialogNotice('');
+    try {
+      const result = await sendCommand<ExportThreadsResult>({
+        type: 'EXPORT_THREADS',
+        payload: { threadIds: [thread.id] }
+      });
+      const archive = result.archives[0];
+      if (!archive) {
+        throw new Error('Target thread was not found');
+      }
+      triggerDownload(threadFileName(archive.thread, archive.exportedAt), JSON.stringify(archive, null, 2));
+      setDeleteDialogNotice('Thread file saved.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setDeleteDialogNotice(`Failed to save thread: ${message}`);
+    } finally {
+      setIsDeleteActionRunning(false);
+    }
+  }
+
+  async function deleteThreadConfirmed(thread: Thread): Promise<void> {
+    setIsDeleteActionRunning(true);
+    setDeleteDialogNotice('');
+    try {
+      await sendCommand({ type: 'DELETE_THREAD', payload: { threadId: thread.id } });
+      await loadThreadsAndMaybeMessages();
+      setDeleteTargetThread(undefined);
+    } finally {
+      setIsDeleteActionRunning(false);
+    }
   }
 
   async function renameThread(threadId: string, title: string): Promise<void> {
@@ -1063,7 +1142,7 @@ export function App(): JSX.Element {
               currentThreadId={currentThreadId}
               onCreate={() => void createThread()}
               onSwitch={(id) => void switchThread(id)}
-              onDelete={(id) => void deleteThread(id)}
+              onDeleteRequest={(thread) => openDeleteDialog(thread)}
               onRename={(id, title) => renameThread(id, title)}
             />
             <section className="chat-panel" aria-label="Chat">
@@ -1204,6 +1283,37 @@ export function App(): JSX.Element {
               </div>
             </section>
           ) : null}
+
+          {deleteTargetThread ? (
+            <div className="confirm-overlay" role="presentation">
+              <div className="confirm-dialog" role="dialog" aria-modal="true" aria-label="Delete thread confirmation">
+                <h3>Delete thread?</h3>
+                <p className="confirm-title">{deleteTargetThread.title}</p>
+                <p className="confirm-note">Save a local file before deletion if you need to keep this thread.</p>
+                {deleteDialogNotice ? <p className="confirm-notice">{deleteDialogNotice}</p> : null}
+                <div className="confirm-actions">
+                  <button type="button" onClick={closeDeleteDialog} disabled={isDeleteActionRunning}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveThreadBeforeDelete(deleteTargetThread)}
+                    disabled={isDeleteActionRunning}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    onClick={() => void deleteThreadConfirmed(deleteTargetThread)}
+                    disabled={isDeleteActionRunning}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </div>
@@ -1225,5 +1335,12 @@ function formatMessageTimestamp(ts: number): string {
 }
 
 function formatThreadUpdatedAt(ts: number): string {
-  return new Date(ts).toLocaleString('en-US', { hour12: false });
+  const date = new Date(ts);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  const second = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
