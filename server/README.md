@@ -1,55 +1,55 @@
 # ws-proxy server
 
-## 起動
+`ws-proxy.mjs` は Chrome 拡張と `codex app-server` の間に入る WebSocket プロキシです。
+`Sec-WebSocket-Extensions` を除去して接続互換性問題を回避します。
 
-`ws-proxy` を起動します（内部で `codex app-server` も起動されます）。
+## 起動
 
 ```bash
 cd server
 node ws-proxy.mjs
 ```
 
-## URI の確認
+- `codex app-server` は `ws-proxy.mjs` が自動起動します。
+- `codex` コマンドが PATH 上に存在し、利用可能である必要があります。
 
-起動時に標準出力へ以下を出力します。
+## 起動ログ
 
-出力例:
+起動成功時の出力例:
 
 ```text
-ws-proxy.mjs - Codex app-server WebSocket プロキシ
-codex: 起動成功 (home: ~/.codex/)
+ws-proxy.mjs - WebSocket proxy for Codex app-server
+codex: started (home: ~/.codex/)
 listening ws://127.0.0.1:43172
 ```
 
-- Chrome 拡張に設定する値は `listening ...` に表示された URL です。
+- 拡張に設定する URL は `listening ...` の値です。
 
 ## ポート自動検出
 
-- `WS_PROXY_LISTEN_PORT` を開始点として未使用ポートを探索します。
-- 探索回数は `WS_PROXY_PORT_SEARCH_LIMIT`（デフォルト 200）です。
+- `WS_PROXY_LISTEN_PORT` を開始点として待受ポートを探索します。
+- `WS_PROXY_UPSTREAM_PORT` を開始点として app-server 側ポートを探索します。
+- 探索回数は `WS_PROXY_PORT_SEARCH_LIMIT`（既定: `200`）です。
 
 ## 環境変数
 
-- `WS_PROXY_LISTEN_HOST`（デフォルト: `127.0.0.1`）
-  - `ws-proxy` が待ち受けるホストです。
-  - 例: `127.0.0.1`（ローカルのみ公開）
-- `WS_PROXY_LISTEN_PORT`（デフォルト: `43172`）
-  - `ws-proxy` 側ポート探索の開始番号です。
-  - この番号が使用中なら、次の番号を順に探索します。
-- `WS_PROXY_PORT_SEARCH_LIMIT`（デフォルト: `200`）
-  - ポート探索の最大試行回数です。
-  - `WS_PROXY_LISTEN_PORT` と `WS_PROXY_UPSTREAM_PORT` の両方に適用されます。
-- `WS_PROXY_UPSTREAM_HOST`（デフォルト: `127.0.0.1`）
-  - `ws-proxy` が接続する `codex app-server` のホストです。
-- `WS_PROXY_UPSTREAM_PORT`（デフォルト: `43171`）
-  - `codex app-server` 側ポート探索の開始番号です。
-  - この番号が使用中なら、次の番号を順に探索します。
-- `WS_PROXY_CODEX_COMMAND`（デフォルト: `codex`）
-  - 起動する Codex CLI コマンド名またはパスです。
-  - 例: `codex` / `/usr/local/bin/codex`
-- `WS_PROXY_CODEX_ARGS`（デフォルト: 空文字）
-  - `codex app-server` 実行時に追加する引数です（空白区切り）。
-  - 例: `--log-level debug`
-- `WS_PROXY_FORWARD_CODEX_LOGS`（デフォルト: `0`）
-  - `1` を設定すると `codex app-server` の標準出力/標準エラーを中継表示します。
-  - 既定では中継表示しません（接続先の誤認防止のため）。
+- `WS_PROXY_LISTEN_HOST`（既定: `127.0.0.1`）
+  - プロキシの待受ホスト
+- `WS_PROXY_LISTEN_PORT`（既定: `43172`）
+  - 待受ポート探索の開始番号
+- `WS_PROXY_PORT_SEARCH_LIMIT`（既定: `200`）
+  - ポート探索の最大試行回数
+- `WS_PROXY_UPSTREAM_HOST`（既定: `127.0.0.1`）
+  - 接続先 `codex app-server` のホスト
+- `WS_PROXY_UPSTREAM_PORT`（既定: `43171`）
+  - 接続先ポート探索の開始番号
+- `WS_PROXY_CODEX_COMMAND`（既定: `codex`）
+  - 起動する Codex CLI コマンド名またはフルパス
+- `WS_PROXY_CODEX_ARGS`（既定: 空）
+  - `codex app-server` に追加する引数（空白区切り）
+- `WS_PROXY_FORWARD_CODEX_LOGS`（既定: `0`）
+  - `1` で `codex` の stdout/stderr を中継表示
+
+## 終了
+
+- `Ctrl+C`（SIGINT）または SIGTERM で、プロキシと `codex app-server` を順次停止します。

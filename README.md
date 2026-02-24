@@ -1,17 +1,46 @@
 # codex-chrome-extension
 
-## リリース対象
+このリポジトリは、Codex app-server を利用する Chrome 拡張（Side Panel UI）と、接続互換性のための WebSocket プロキシを提供します。
 
-- `./extension/dist`: Chrome 拡張成果物
-- `./server`: WS プロキシ配布物
+## 構成
 
-## WS プロキシ起動
+- `extension/`: Chrome 拡張本体（Manifest V3, React, TypeScript）
+- `server/`: `codex app-server` を自動起動する WebSocket プロキシ
+
+## クイックスタート
+
+1. 拡張をビルドします。
 
 ```bash
-codex app-server --listen ws://127.0.0.1:43171
+cd extension
+npm ci
+npm run build
+```
+
+2. Chrome に読み込みます。
+
+- `chrome://extensions` を開く
+- 「デベロッパーモード」を ON
+- 「パッケージ化されていない拡張機能を読み込む」から `extension/dist/` を選択
+
+3. 別ターミナルでプロキシを起動します（`codex app-server` も自動起動）。
+
+```bash
 cd server
 node ws-proxy.mjs
 ```
 
-- URI は標準出力に `WS_PROXY_URI=...` で出力されます。
-- その URI を拡張の WebSocket URL に設定してください。
+4. 出力された `listening ws://...` を拡張の Options で `WebSocket URL` に設定します。
+
+出力例:
+
+```text
+ws-proxy.mjs - WebSocket proxy for Codex app-server
+codex: started (home: ~/.codex/)
+listening ws://127.0.0.1:43172
+```
+
+## リリース対象
+
+- `extension/dist/`: Chrome 拡張の配布用成果物
+- `server/ws-proxy.mjs`: プロキシ実行スクリプト

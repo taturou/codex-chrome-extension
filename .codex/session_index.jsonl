@@ -35,3 +35,4 @@
 {"id":"019c8d9a-bf5c-7d42-93c3-a814644d03cf","thread_name":"extension と server に分ける","updated_at":"2026-02-24T05:20:36.034873281Z"}
 {"id":"019c8e18-2e46-77e1-9e55-9df4d7503483","thread_name":"ws-proxy 自身が codex を起動する","updated_at":"2026-02-24T05:58:44.25125517Z"}
 {"id":"019c8e3a-bc7e-74e1-861f-13c4c0915dfe","thread_name":"接続施工中は Disconnect ボタンを表示する","updated_at":"2026-02-24T06:11:50.650101917Z"}
+{"id":"019c8e50-cb8c-7fa2-a46e-85514aa17c3b","thread_name":"README を更新","updated_at":"2026-02-24T06:29:07.15934931Z"}
