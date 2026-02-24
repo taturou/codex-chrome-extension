@@ -15,3 +15,5 @@ node_modules
 .codex/version.json
 .venv
 dist/
+extension/dist/
+server/node_modules/

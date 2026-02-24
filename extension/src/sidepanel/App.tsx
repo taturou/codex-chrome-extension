@@ -1249,7 +1249,7 @@ export function App(): JSX.Element {
           <h2>Connection Settings</h2>
           <label>
             Codex app-server URL
-            <input value={wsUrl} onChange={(event) => setWsUrl(event.target.value)} placeholder="ws://127.0.0.1:4317" />
+            <input value={wsUrl} onChange={(event) => setWsUrl(event.target.value)} placeholder="ws://127.0.0.1:43172" />
           </label>
           <div className="connection-gate-actions">
             <button type="button" onClick={() => void saveSettings()}>
@@ -1260,6 +1260,7 @@ export function App(): JSX.Element {
             </button>
           </div>
           <small>Threads and chat will appear after connecting.</small>
+          <small>Press Ctrl+Shift+D to show WS debug logs.</small>
         </section>
       ) : (
         <>
@@ -1382,40 +1383,6 @@ export function App(): JSX.Element {
             </section>
           </div>
 
-          {devMode ? (
-            <section className="ws-debug-log" aria-label="WS debug log">
-              <div className="ws-debug-log-header">
-                <strong>WS Logs</strong>
-                <div className="ws-debug-log-actions">
-                  <button type="button" onClick={() => void copyWsLogs('latest')}>
-                    Copy latest
-                  </button>
-                  <button type="button" onClick={() => void copyWsLogs('all')}>
-                    Copy all
-                  </button>
-                  <button type="button" onClick={() => setWsLogs([])}>
-                    Clear
-                  </button>
-                </div>
-              </div>
-              {copyNotice ? <small>{copyNotice}</small> : null}
-              <div className="ws-debug-log-body">
-                {wsLogs.length === 0 ? (
-                  <small>No logs</small>
-                ) : (
-                  wsLogs.map((entry, index) => (
-                    <div key={`${entry.ts}-${index}`} className={`ws-log-entry ${entry.category}`}>
-                      <span className="ts">{formatTime(entry.ts)}</span>
-                      <span className="cat">[{entry.category}]</span>
-                      <span className="msg">{entry.message}</span>
-                      {entry.detail ? <pre className="detail">{entry.detail}</pre> : null}
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-          ) : null}
-
           {deleteTargetThread ? (
             <div className="confirm-overlay" role="presentation">
               <div className="confirm-dialog" role="dialog" aria-modal="true" aria-label="Delete thread confirmation">
@@ -1448,6 +1415,40 @@ export function App(): JSX.Element {
           ) : null}
         </>
       )}
+
+      {devMode ? (
+        <section className="ws-debug-log" aria-label="WS debug log">
+          <div className="ws-debug-log-header">
+            <strong>WS Logs</strong>
+            <div className="ws-debug-log-actions">
+              <button type="button" onClick={() => void copyWsLogs('latest')}>
+                Copy latest
+              </button>
+              <button type="button" onClick={() => void copyWsLogs('all')}>
+                Copy all
+              </button>
+              <button type="button" onClick={() => setWsLogs([])}>
+                Clear
+              </button>
+            </div>
+          </div>
+          {copyNotice ? <small>{copyNotice}</small> : null}
+          <div className="ws-debug-log-body">
+            {wsLogs.length === 0 ? (
+              <small>No logs</small>
+            ) : (
+              wsLogs.map((entry, index) => (
+                <div key={`${entry.ts}-${index}`} className={`ws-log-entry ${entry.category}`}>
+                  <span className="ts">{formatTime(entry.ts)}</span>
+                  <span className="cat">[{entry.category}]</span>
+                  <span className="msg">{entry.message}</span>
+                  {entry.detail ? <pre className="detail">{entry.detail}</pre> : null}
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -32,3 +32,4 @@
 {"id":"019c8d23-fb38-70a3-a5f4-7576774c60d1","thread_name":"Connect/Disconnect ボタンを整理","updated_at":"2026-02-24T01:10:16.043508728Z"}
 {"id":"019c8d3a-70f4-7243-b823-f1fd1a7e92f0","thread_name":"拡張機能のバージョンを package.json:version から自動設定する","updated_at":"2026-02-24T01:30:34.193724984Z"}
 {"id":"019c8d46-b0c6-72c2-b18c-b5cf12734b1d","thread_name":"manifest.json:optional_host_permissions のサイトでのみ動く。manifest.jsonの改ざんを検出する。","updated_at":"2026-02-24T02:05:01.901484219Z"}
+{"id":"019c8d9a-bf5c-7d42-93c3-a814644d03cf","thread_name":"extension と server に分ける","updated_at":"2026-02-24T05:20:36.034873281Z"}

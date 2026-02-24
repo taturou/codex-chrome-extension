@@ -1,6 +1,6 @@
 {
   "name": "codex-chrome-extension",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,8 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
-    "lint": "eslint .",
-    "ws:proxy": "node scripts/ws-proxy.mjs"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@openai/codex": "^0.104.0",
