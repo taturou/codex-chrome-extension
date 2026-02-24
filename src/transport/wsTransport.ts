@@ -11,6 +11,7 @@ interface ChatSendPayload {
 interface TransportEvents {
   onStatus: (status: WsStatus, reason?: string) => void;
   onDebug: (entry: WsDebugLogEntry) => void;
+  onThreadMapped: (event: { localThreadId: string; remoteThreadId: string }) => void;
   onUsage: (usage: UsageLimits) => void;
   onToken: (event: { threadId: string; messageId?: string; token: string }) => void;
   onDone: (event: { threadId: string; messageId?: string }) => void;
@@ -30,6 +31,15 @@ type PendingRequest =
     }
   | {
       kind: 'turn/start';
+      remoteThreadId: string;
+      localThreadId: string;
+      localMessageId: string;
+      text: string;
+      attachments: Attachment[];
+      retryCount: number;
+    }
+  | {
+      kind: 'thread/resume';
       remoteThreadId: string;
       localThreadId: string;
       localMessageId: string;
@@ -372,6 +382,7 @@ export class WebSocketTransport {
   private latestLocalMessageByThread = new Map<string, string>();
   private remoteThreadByLocal = new Map<string, string>();
   private localThreadByRemote = new Map<string, string>();
+  private resumedRemoteThreads = new Set<string>();
   private initState: InitState = 'idle';
   private rpcSequence = 1;
   private initRequestId: string | null = null;
@@ -460,6 +471,7 @@ export class WebSocketTransport {
       this.initRequestId = null;
       this.pendingRequests.clear();
       this.clearRetryTimers();
+      this.resumedRemoteThreads.clear();
       const reasonParts = [`code=${event.code}`];
       if (event.reason) {
         reasonParts.push(`reason=${event.reason}`);
@@ -489,6 +501,7 @@ export class WebSocketTransport {
     this.latestLocalMessageByThread.clear();
     this.remoteThreadByLocal.clear();
     this.localThreadByRemote.clear();
+    this.resumedRemoteThreads.clear();
     this.pendingRequests.clear();
     this.initState = 'idle';
     this.initRequestId = null;
@@ -511,6 +524,7 @@ export class WebSocketTransport {
     this.latestLocalMessageByThread.clear();
     this.remoteThreadByLocal.clear();
     this.localThreadByRemote.clear();
+    this.resumedRemoteThreads.clear();
     this.pendingRequests.clear();
     this.initState = 'idle';
     this.initRequestId = null;
@@ -534,8 +548,13 @@ export class WebSocketTransport {
     this.latestLocalMessageByThread.set(payload.threadId, payload.messageId);
     const remoteThreadId = this.remoteThreadByLocal.get(payload.threadId);
     if (remoteThreadId) {
-      this.debug('state', 'send turn/start (existing thread)', `local=${payload.threadId} remote=${remoteThreadId}`);
-      this.sendTurnStart(remoteThreadId, payload.threadId, payload.messageId, payload.text, payload.attachments);
+      if (this.resumedRemoteThreads.has(remoteThreadId)) {
+        this.debug('state', 'send turn/start (existing thread)', `local=${payload.threadId} remote=${remoteThreadId}`);
+        this.sendTurnStart(remoteThreadId, payload.threadId, payload.messageId, payload.text, payload.attachments);
+        return;
+      }
+      this.debug('state', 'send thread/resume (known thread)', `local=${payload.threadId} remote=${remoteThreadId}`);
+      this.sendThreadResume(remoteThreadId, payload.threadId, payload.messageId, payload.text, payload.attachments);
       return;
     }
     this.debug('state', 'send thread/start (new thread)', `local=${payload.threadId}`);
@@ -550,6 +569,14 @@ export class WebSocketTransport {
       throw new Error('WebSocket is not initialized');
     }
     this.sendUsageFetch(0);
+  }
+
+  hydrateThreadMapping(localThreadId: string, remoteThreadId: string): void {
+    if (!localThreadId || !remoteThreadId) {
+      return;
+    }
+    this.remoteThreadByLocal.set(localThreadId, remoteThreadId);
+    this.localThreadByRemote.set(remoteThreadId, localThreadId);
   }
 
   private scheduleReconnect(): void {
@@ -610,6 +637,28 @@ export class WebSocketTransport {
     });
     this.pendingRequests.set(id, {
       kind: 'thread/start',
+      localThreadId,
+      localMessageId,
+      text,
+      attachments,
+      retryCount
+    });
+  }
+
+  private sendThreadResume(
+    remoteThreadId: string,
+    localThreadId: string,
+    localMessageId: string,
+    text: string,
+    attachments: Attachment[],
+    retryCount = 0
+  ): void {
+    const id = this.sendRpcRequest('thread/resume', {
+      threadId: remoteThreadId
+    });
+    this.pendingRequests.set(id, {
+      kind: 'thread/resume',
+      remoteThreadId,
       localThreadId,
       localMessageId,
       text,
@@ -689,6 +738,27 @@ export class WebSocketTransport {
     this.debug('send', `rpc notification ${method}`, truncate(safeStringify(payload), 1200));
   }
 
+  private setThreadMapping(localThreadId: string, remoteThreadId: string): void {
+    const previousRemote = this.remoteThreadByLocal.get(localThreadId);
+    if (previousRemote && previousRemote !== remoteThreadId) {
+      this.localThreadByRemote.delete(previousRemote);
+      this.resumedRemoteThreads.delete(previousRemote);
+    }
+    this.remoteThreadByLocal.set(localThreadId, remoteThreadId);
+    this.localThreadByRemote.set(remoteThreadId, localThreadId);
+    this.events.onThreadMapped({ localThreadId, remoteThreadId });
+  }
+
+  private clearLocalThreadMapping(localThreadId: string): void {
+    const previousRemote = this.remoteThreadByLocal.get(localThreadId);
+    if (!previousRemote) {
+      return;
+    }
+    this.remoteThreadByLocal.delete(localThreadId);
+    this.localThreadByRemote.delete(previousRemote);
+    this.resumedRemoteThreads.delete(previousRemote);
+  }
+
   private resolveLocalThreadId(threadId?: string): string | undefined {
     if (!threadId) {
       return undefined;
@@ -754,6 +824,12 @@ export class WebSocketTransport {
         });
         return;
       }
+      if (pending.kind === 'thread/resume') {
+        this.debug('error', 'thread/resume failed, fallback to thread/start', message);
+        this.clearLocalThreadMapping(pending.localThreadId);
+        this.sendThreadStart(pending.localThreadId, pending.localMessageId, pending.text, pending.attachments);
+        return;
+      }
       this.debug('error', `rpc error (${pending.kind})`, message);
       this.events.onError({
         threadId: pending.localThreadId,
@@ -782,9 +858,25 @@ export class WebSocketTransport {
         });
         return;
       }
-      this.remoteThreadByLocal.set(pending.localThreadId, remoteThreadId);
-      this.localThreadByRemote.set(remoteThreadId, pending.localThreadId);
+      this.setThreadMapping(pending.localThreadId, remoteThreadId);
+      this.resumedRemoteThreads.add(remoteThreadId);
       this.debug('state', 'thread mapped', `local=${pending.localThreadId} remote=${remoteThreadId}`);
+      this.sendTurnStart(
+        remoteThreadId,
+        pending.localThreadId,
+        pending.localMessageId,
+        pending.text,
+        pending.attachments
+      );
+      return;
+    }
+
+    if (pending.kind === 'thread/resume') {
+      const thread = extractRecord(result?.thread);
+      const remoteThreadId = extractString(thread?.id) ?? pending.remoteThreadId;
+      this.setThreadMapping(pending.localThreadId, remoteThreadId);
+      this.resumedRemoteThreads.add(remoteThreadId);
+      this.debug('state', 'thread resumed', `local=${pending.localThreadId} remote=${remoteThreadId}`);
       this.sendTurnStart(
         remoteThreadId,
         pending.localThreadId,
@@ -813,6 +905,17 @@ export class WebSocketTransport {
       }
       if (pending.kind === 'thread/start') {
         this.sendThreadStart(
+          pending.localThreadId,
+          pending.localMessageId,
+          pending.text,
+          pending.attachments,
+          pending.retryCount
+        );
+        return;
+      }
+      if (pending.kind === 'thread/resume') {
+        this.sendThreadResume(
+          pending.remoteThreadId,
           pending.localThreadId,
           pending.localMessageId,
           pending.text,

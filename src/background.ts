@@ -189,6 +189,9 @@ const transport = new WebSocketTransport({
       payload: { entry }
     });
   },
+  onThreadMapped: ({ localThreadId, remoteThreadId }) => {
+    void repository.setThreadRemoteId(localThreadId, remoteThreadId);
+  },
   onUsage: (usage) => {
     void setUsage(usage);
   },
@@ -902,6 +905,9 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
       await repository.setCurrentThread(thread.id);
 
       try {
+        if (thread.remoteThreadId) {
+          transport.hydrateThreadMapping(thread.id, thread.remoteThreadId);
+        }
         transport.sendChat({
           threadId: thread.id,
           messageId: assistantMessage.id,

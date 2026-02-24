@@ -164,6 +164,29 @@ export class StorageRepository {
     });
   }
 
+  async setThreadRemoteId(threadId: string, remoteThreadId: string): Promise<Thread | undefined> {
+    return this.enqueueWrite(async () => {
+      const store = await this.getStore();
+      const index = store.threads.findIndex((thread) => thread.id === threadId);
+      if (index < 0) {
+        return undefined;
+      }
+
+      const existing = store.threads[index];
+      if (existing.remoteThreadId === remoteThreadId) {
+        return existing;
+      }
+
+      const updated: Thread = {
+        ...existing,
+        remoteThreadId
+      };
+      store.threads[index] = updated;
+      await this.saveStore(store);
+      return updated;
+    });
+  }
+
   async getThreadMessages(threadId: string): Promise<Message[]> {
     const store = await this.getStore();
     return store.messagesByThread[threadId] ?? [];

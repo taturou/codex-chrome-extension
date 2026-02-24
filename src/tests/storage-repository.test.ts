@@ -168,6 +168,36 @@ describe('StorageRepository renameThread', () => {
   });
 });
 
+describe('StorageRepository setThreadRemoteId', () => {
+  beforeEach(() => {
+    const local = createChromeStorageMock();
+    vi.stubGlobal('chrome', {
+      storage: { local }
+    });
+  });
+
+  it('既存スレッドに remoteThreadId を保存する', async () => {
+    const repo = new StorageRepository();
+    await repo.upsertThread({
+      id: 't1',
+      title: 'old',
+      createdAt: 1,
+      updatedAt: 1,
+      lastMessageAt: 1
+    });
+
+    await repo.setThreadRemoteId('t1', 'remote-1');
+    const threads = await repo.listThreads();
+    expect(threads[0].remoteThreadId).toBe('remote-1');
+  });
+
+  it('存在しないスレッドIDの場合は undefined を返す', async () => {
+    const repo = new StorageRepository();
+    const result = await repo.setThreadRemoteId('missing', 'remote-1');
+    expect(result).toBeUndefined();
+  });
+});
+
 describe('StorageRepository reserveNextThreadTitle', () => {
   beforeEach(() => {
     const local = createChromeStorageMock();

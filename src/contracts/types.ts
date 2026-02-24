@@ -59,6 +59,7 @@ export interface Message {
 
 export interface Thread {
   id: string;
+  remoteThreadId?: string;
   title: string;
   createdAt: number;
   updatedAt: number;

@@ -79,6 +79,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone: () => {},
       onError: () => {}
@@ -94,6 +95,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone: () => {},
       onError: () => {}
@@ -112,6 +114,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken,
       onDone: () => {},
       onError: () => {}
@@ -145,6 +148,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone,
       onError: () => {}
@@ -182,6 +186,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone,
       onError: () => {}
@@ -210,6 +215,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken,
       onDone: () => {},
       onError: () => {}
@@ -269,6 +275,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone: () => {},
       onError
@@ -299,6 +306,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone: () => {},
       onError: () => {}
@@ -343,6 +351,7 @@ describe('WebSocketTransport', () => {
       const transport = new WebSocketTransport({
         onStatus: () => {},
         onDebug: () => {},
+        onThreadMapped: () => {},
         onToken: () => {},
         onDone: () => {},
         onError
@@ -392,10 +401,90 @@ describe('WebSocketTransport', () => {
     }
   });
 
+  it('保存済み remote threadId がある場合は thread/resume 後に turn/start する', () => {
+    const onThreadMapped = vi.fn();
+    const transport = new WebSocketTransport({
+      onStatus: () => {},
+      onDebug: () => {},
+      onThreadMapped,
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {}
+    });
+
+    transport.connect('ws://localhost:3000');
+    const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
+    transport.hydrateThreadMapping('t1', 'remote-t1');
+
+    transport.sendChat({
+      threadId: 't1',
+      messageId: 'local-msg-1',
+      text: 'hi',
+      attachments: []
+    });
+
+    const resumeRaw = socket.sent.find((entry) => entry.includes('"method":"thread/resume"'));
+    expect(resumeRaw).toBeTruthy();
+    const resume = JSON.parse(String(resumeRaw)) as { id: string };
+    socket.onmessage?.({
+      data: JSON.stringify({
+        id: resume.id,
+        result: { thread: { id: 'remote-t1' } }
+      })
+    } as MessageEvent);
+
+    const turnStartCount = socket.sent.filter((entry) => entry.includes('"method":"turn/start"')).length;
+    expect(turnStartCount).toBe(1);
+    expect(onThreadMapped).toHaveBeenCalledWith({
+      localThreadId: 't1',
+      remoteThreadId: 'remote-t1'
+    });
+  });
+
+  it('thread/resume 失敗時は thread/start にフォールバックする', () => {
+    const transport = new WebSocketTransport({
+      onStatus: () => {},
+      onDebug: () => {},
+      onThreadMapped: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {}
+    });
+
+    transport.connect('ws://localhost:3000');
+    const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
+    transport.hydrateThreadMapping('t1', 'stale-remote');
+
+    transport.sendChat({
+      threadId: 't1',
+      messageId: 'local-msg-1',
+      text: 'hi',
+      attachments: []
+    });
+
+    const resumeRaw = socket.sent.find((entry) => entry.includes('"method":"thread/resume"'));
+    if (!resumeRaw) {
+      throw new Error('thread/resume not sent');
+    }
+    const resume = JSON.parse(resumeRaw) as { id: string };
+    socket.onmessage?.({
+      data: JSON.stringify({
+        id: resume.id,
+        error: { code: -32602, message: 'thread not found' }
+      })
+    } as MessageEvent);
+
+    const threadStartRaw = socket.sent.find((entry) => entry.includes('"method":"thread/start"'));
+    expect(threadStartRaw).toBeTruthy();
+  });
+
   it('添付テキストは untrusted_context として構造化し命令チャネルから分離する', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone: () => {},
       onError: () => {}
@@ -444,6 +533,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport({
       onStatus: () => {},
       onDebug: () => {},
+      onThreadMapped: () => {},
       onToken: () => {},
       onDone: () => {},
       onError: () => {}
