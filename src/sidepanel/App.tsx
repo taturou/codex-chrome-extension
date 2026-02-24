@@ -54,8 +54,42 @@ function rateLimitLeftPercent(item: RateLimitItem): number {
   return Math.max(0, Math.min(100, 100 - rateLimitPercent(item)));
 }
 
+function parseResetTime(value: string | undefined): Date | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    const ms = numeric >= 1e12 ? numeric : numeric * 1000;
+    const date = new Date(ms);
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  return date;
+}
+
+function formatResetTime(value: string | undefined): string | undefined {
+  const resetAt = parseResetTime(value);
+  if (!resetAt) {
+    return undefined;
+  }
+  const hours = String(resetAt.getHours()).padStart(2, '0');
+  const minutes = String(resetAt.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
 function rateLimitMeta(item: RateLimitItem): string {
-  return `${Math.round(rateLimitLeftPercent(item))}% left`;
+  const left = `${Math.round(rateLimitLeftPercent(item))}% left`;
+  const resetTime = formatResetTime(item.resetsAt);
+  if (!resetTime) {
+    return left;
+  }
+  return `${left} (resets ${resetTime})`;
 }
 
 function isPrimaryLimit(item: RateLimitItem): boolean {
