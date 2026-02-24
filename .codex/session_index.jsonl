@@ -30,3 +30,4 @@
 {"id":"019c8d10-2195-7df1-884c-21d7dab9b859","thread_name":"codexからの返信のコードブロック表示くずれを修正","updated_at":"2026-02-24T00:48:49.330230337Z"}
 {"id":"019c8d1f-029f-7182-b273-efba4d685546","thread_name":"リミット値にリセット時刻を表示","updated_at":"2026-02-24T00:54:19.320352653Z"}
 {"id":"019c8d23-fb38-70a3-a5f4-7576774c60d1","thread_name":"Connect/Disconnect ボタンを整理","updated_at":"2026-02-24T01:10:16.043508728Z"}
+{"id":"019c8d3a-70f4-7243-b823-f1fd1a7e92f0","thread_name":"拡張機能のバージョンを package.json:version から自動設定する","updated_at":"2026-02-24T01:30:34.193724984Z"}

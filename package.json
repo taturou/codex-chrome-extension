@@ -1,9 +1,11 @@
 {
   "name": "codex-chrome-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "sync:version": "node scripts/sync-manifest-version.mjs",
+    "prebuild": "npm run sync:version",
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",

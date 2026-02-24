@@ -73,9 +73,16 @@ WS_PROXY_UPSTREAM_PORT=43171 WS_PROXY_LISTEN_PORT=43173 npm run ws:proxy
 
 - `npm run dev`: Vite 開発サーバー起動
 - `npm run build`: 拡張ビルド（`dist/` 出力）
+- `npm run sync:version`: `package.json` の `version` を `public/manifest.json` に同期
 - `npm test`: Vitest 実行
 - `npm run lint`: ESLint 実行
 - `npm run ws:proxy`: ローカルWSプロキシ起動（拡張 -> proxy -> app-server）
+
+## バージョン運用
+
+- `package.json.version` は `X.Y.Z` 形式のみ許可しています。
+- 各要素は整数かつ `0..65535` の範囲です。
+- `npm run build` 実行時に `prebuild` で `npm run sync:version` を実行し、条件違反時はビルド失敗します。
 
 ## メッセージ契約（内部）
 
