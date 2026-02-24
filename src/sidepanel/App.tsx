@@ -710,7 +710,7 @@ export function App(): JSX.Element {
     }
 
     if (event.type === 'CHAT_DONE') {
-      const { threadId, messageId } = event.payload;
+      const { threadId, messageId, finalText } = event.payload;
       setTokenTimestampByMessage((prev) => {
         const next = { ...prev };
         delete next[messageId];
@@ -718,7 +718,15 @@ export function App(): JSX.Element {
       });
       setMessagesByThread((prev) => {
         const current = prev[threadId] ?? [];
-        const next = current.map((msg) => (msg.id === messageId ? { ...msg, status: 'done' as const } : msg));
+        const next = current.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                ...(typeof finalText === 'string' && finalText.length > 0 ? { contentMd: finalText } : {}),
+                status: 'done' as const
+              }
+            : msg
+        );
         return { ...prev, [threadId]: next };
       });
       return;

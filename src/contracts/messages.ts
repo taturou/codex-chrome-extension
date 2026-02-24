@@ -35,7 +35,7 @@ export type SidePanelEvent =
   | RuntimeEnvelope<'USAGE_LIMITS_UPDATED', { usage: UsageLimits }>
   | RuntimeEnvelope<'THREADS_UPDATED', { reason: 'import_threads' }>
   | RuntimeEnvelope<'CHAT_TOKEN', { threadId: string; messageId: string; token: string }>
-  | RuntimeEnvelope<'CHAT_DONE', { threadId: string; messageId: string }>
+  | RuntimeEnvelope<'CHAT_DONE', { threadId: string; messageId: string; finalText?: string }>
   | RuntimeEnvelope<'CHAT_ERROR', { threadId: string; messageId: string; error: string }>
   | RuntimeEnvelope<'SELECTION_ATTACHED', { attachment: Attachment }>;
 

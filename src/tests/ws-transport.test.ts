@@ -143,6 +143,39 @@ describe('WebSocketTransport', () => {
     });
   });
 
+  it('二重エスケープされた改行入り token を復元する', () => {
+    const onToken = vi.fn();
+    const transport = new WebSocketTransport({
+      onStatus: () => {},
+      onDebug: () => {},
+      onThreadMapped: () => {},
+      onToken,
+      onDone: () => {},
+      onError: () => {}
+    });
+
+    transport.connect('ws://localhost:3000');
+    const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        method: 'item/agentMessage/delta',
+        params: {
+          threadId: 't1',
+          itemId: 'item-1',
+          delta: '```ts\\nconst x = 1;\\n```'
+        }
+      })
+    } as MessageEvent);
+
+    expect(onToken).toHaveBeenCalledWith({
+      threadId: 't1',
+      messageId: 'item-1',
+      token: '```ts\nconst x = 1;\n```'
+    });
+  });
+
   it('turn/completed で messageId 欠落時は送信済み local messageId を補完する', () => {
     const onDone = vi.fn();
     const transport = new WebSocketTransport({
@@ -178,6 +211,49 @@ describe('WebSocketTransport', () => {
     expect(onDone).toHaveBeenCalledWith({
       threadId: 't1',
       messageId: 'local-msg-1'
+    });
+  });
+
+  it('item/completed の agentMessage.text を done の finalText として通知する', () => {
+    const onDone = vi.fn();
+    const transport = new WebSocketTransport({
+      onStatus: () => {},
+      onDebug: () => {},
+      onThreadMapped: () => {},
+      onToken: () => {},
+      onDone,
+      onError: () => {}
+    });
+
+    transport.connect('ws://localhost:3000');
+    const socket = FakeWebSocket.instances[0];
+    openAndInitialize(socket);
+
+    transport.sendChat({
+      threadId: 't1',
+      messageId: 'local-msg-1',
+      text: 'hi',
+      attachments: []
+    });
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        method: 'item/completed',
+        params: {
+          threadId: 't1',
+          item: {
+            type: 'agentMessage',
+            id: 'remote-msg-1',
+            text: '```bash\nls\n```'
+          }
+        }
+      })
+    } as MessageEvent);
+
+    expect(onDone).toHaveBeenCalledWith({
+      threadId: 't1',
+      messageId: 'local-msg-1',
+      finalText: '```bash\nls\n```'
     });
   });
 

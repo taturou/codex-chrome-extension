@@ -14,7 +14,7 @@ interface TransportEvents {
   onThreadMapped: (event: { localThreadId: string; remoteThreadId: string }) => void;
   onUsage: (usage: UsageLimits) => void;
   onToken: (event: { threadId: string; messageId?: string; token: string }) => void;
-  onDone: (event: { threadId: string; messageId?: string }) => void;
+  onDone: (event: { threadId: string; messageId?: string; finalText?: string }) => void;
   onError: (event: { threadId?: string; messageId?: string; error: string }) => void;
 }
 
@@ -116,6 +116,66 @@ function pickNumber(source: Record<string, unknown>, keys: string[]): number | u
     const found = normalizeNumber(source[key]);
     if (found !== undefined) {
       return found;
+    }
+  }
+  return undefined;
+}
+
+function normalizeIncomingToken(token: string): string {
+  if (!token.includes('\\')) {
+    return token;
+  }
+
+  let normalized = token;
+  const trimmed = token.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === 'string') {
+        normalized = parsed;
+      }
+    } catch {
+      // no-op: fallback to manual unescape below.
+    }
+  }
+
+  if (!/\\(?:n|r|t|`|u[0-9a-fA-F]{4}|\\)/.test(normalized)) {
+    return normalized;
+  }
+
+  return normalized
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\u0060/gi, '`')
+    .replace(/\\`/g, '`')
+    .replace(/\\\\/g, '\\');
+}
+
+function extractItemText(item: Record<string, unknown> | undefined): string | undefined {
+  if (!item) {
+    return undefined;
+  }
+
+  const directText = extractString(item.text);
+  if (directText) {
+    return directText;
+  }
+
+  const content = item.content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  for (const entry of content) {
+    const part = extractRecord(entry);
+    if (!part) {
+      continue;
+    }
+    const text = extractString(part.text);
+    if (text) {
+      return text;
     }
   }
   return undefined;
@@ -307,7 +367,7 @@ function extractUsageLimits(data: Record<string, unknown>, depth = 0): UsageLimi
 
 function parseIncoming(raw: string):
   | { kind: 'token'; threadId?: string; messageId?: string; token: string; sourceMethod?: string }
-  | { kind: 'done'; threadId?: string; messageId?: string }
+  | { kind: 'done'; threadId?: string; messageId?: string; finalText?: string }
   | { kind: 'error'; threadId?: string; messageId?: string; error: string }
   | { kind: 'usage'; usage: UsageLimits }
   | { kind: 'unknown' } {
@@ -320,6 +380,7 @@ function parseIncoming(raw: string):
     const params = extractRecord(data.params);
     const payload = extractRecord(data.payload);
     const msg = extractRecord(params?.msg);
+    const item = extractRecord(params?.item) ?? extractRecord(msg?.item);
     const errorObj = extractRecord(data.error) ?? extractRecord(params?.error);
     const isRpcResponse = typeof data.id === 'string' || typeof data.id === 'number';
     if (isRpcResponse) {
@@ -329,8 +390,9 @@ function parseIncoming(raw: string):
     const method = pickString([data], ['method']);
     const type = pickString([data, params, msg], ['type', 'event']);
     const threadId = pickString([data, params, msg], ['threadId', 'thread_id', 'conversationId', 'conversation_id']);
-    const messageId = pickString([data, params, msg], ['messageId', 'message_id', 'itemId', 'item_id']);
-    const token = pickString([data, params, payload, msg], ['token', 'delta']) ?? '';
+    const messageId =
+      pickString([data, params, msg], ['messageId', 'message_id', 'itemId', 'item_id']) ?? extractString(item?.id);
+    const token = normalizeIncomingToken(pickString([data, params, payload, msg], ['token', 'delta']) ?? '');
     const usage = extractUsageLimits(data);
     if (usage) {
       return { kind: 'usage', usage };
@@ -352,9 +414,23 @@ function parseIncoming(raw: string):
       method === 'turn/completed' ||
       type === 'turn_completed' ||
       type === 'turn_done' ||
-      method === 'turn/done';
+      method === 'turn/done' ||
+      method === 'item/completed' ||
+      method === 'codex/event/item_completed' ||
+      type === 'item_completed';
     if (isDoneEvent) {
-      return { kind: 'done', threadId, messageId };
+      const itemType = extractString(item?.type)?.toLowerCase();
+      const isAgentMessageCompleted =
+        method === 'turn/completed' ||
+        type === 'turn_completed' ||
+        type === 'turn_done' ||
+        method === 'turn/done' ||
+        Boolean(itemType && itemType.includes('agentmessage'));
+      if (!isAgentMessageCompleted) {
+        return { kind: 'unknown' };
+      }
+      const finalText = itemType && itemType.includes('agentmessage') ? extractItemText(item) : undefined;
+      return { kind: 'done', threadId, messageId, ...(finalText ? { finalText } : {}) };
     }
 
     if (data.error || method === 'error' || Boolean(type && type.includes('error'))) {
@@ -444,7 +520,11 @@ export class WebSocketTransport {
         }
         const latestLocalMessageId = this.latestLocalMessageByThread.get(localThreadId);
         const resolvedMessageId = latestLocalMessageId ?? parsed.messageId;
-        this.events.onDone({ threadId: localThreadId, messageId: resolvedMessageId });
+        this.events.onDone({
+          threadId: localThreadId,
+          messageId: resolvedMessageId,
+          ...(parsed.finalText ? { finalText: parsed.finalText } : {})
+        });
         if (resolvedMessageId) {
           this.latestLocalMessageByThread.delete(localThreadId);
         }

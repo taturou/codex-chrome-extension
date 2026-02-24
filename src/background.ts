@@ -160,13 +160,13 @@ async function appendTokenWithFallback(
   return { resolvedMessageId: fallbackMessageId, updated: fallbackUpdated };
 }
 
-async function updateMessageStatusWithFallback(
+async function updateMessageWithFallback(
   threadId: string,
   messageId: string | undefined,
-  status: Message['status']
+  patch: Partial<Message>
 ): Promise<string | undefined> {
   if (messageId) {
-    const updated = await repository.updateMessage(threadId, messageId, { status });
+    const updated = await repository.updateMessage(threadId, messageId, patch);
     if (updated) {
       return messageId;
     }
@@ -177,7 +177,7 @@ async function updateMessageStatusWithFallback(
     return undefined;
   }
 
-  await repository.updateMessage(threadId, fallbackMessageId, { status });
+  await repository.updateMessage(threadId, fallbackMessageId, patch);
   return fallbackMessageId;
 }
 
@@ -210,15 +210,22 @@ const transport = new WebSocketTransport({
       }
     })();
   },
-  onDone: ({ threadId, messageId }) => {
+  onDone: ({ threadId, messageId, finalText }) => {
     void (async () => {
-      const resolvedMessageId = await updateMessageStatusWithFallback(threadId, messageId, 'done');
+      const resolvedMessageId = await updateMessageWithFallback(threadId, messageId, {
+        status: 'done',
+        ...(typeof finalText === 'string' && finalText.length > 0 ? { contentMd: finalText } : {})
+      });
       if (!resolvedMessageId) {
         return;
       }
       await broadcast({
         type: 'CHAT_DONE',
-        payload: { threadId, messageId: resolvedMessageId }
+        payload: {
+          threadId,
+          messageId: resolvedMessageId,
+          ...(typeof finalText === 'string' && finalText.length > 0 ? { finalText } : {})
+        }
       });
       if (wsStatus === 'connected') {
         try {
@@ -236,7 +243,7 @@ const transport = new WebSocketTransport({
         return;
       }
 
-      const resolvedMessageId = await updateMessageStatusWithFallback(threadId, messageId, 'error');
+      const resolvedMessageId = await updateMessageWithFallback(threadId, messageId, { status: 'error' });
       if (!resolvedMessageId) {
         await setStatus('error', error);
         return;
