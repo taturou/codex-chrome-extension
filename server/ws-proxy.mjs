@@ -197,7 +197,11 @@ function spawnCodexAppServer(port) {
 }
 
 function codexHomeLabel() {
-  return process.env.CODEX_HOME ? '$CODEX_HOME/' : '~/.codex/';
+  const codexHome = process.env.CODEX_HOME?.trim();
+  if (!codexHome) {
+    return '~/.codex/';
+  }
+  return codexHome.endsWith('/') ? codexHome : `${codexHome}/`;
 }
 
 function waitForUpstreamReady(host, port, timeoutMs = 5000, intervalMs = 100) {
