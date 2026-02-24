@@ -31,6 +31,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .usage-bars {
@@ -72,6 +73,25 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.subtle-action-button {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.subtle-action-button:hover {
+  color: #334155;
+  background: #f1f5f9;
+}
+
+.subtle-action-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
 }
 
 .status {
@@ -127,17 +147,6 @@ button {
   background: #fff;
   padding: 6px 10px;
   cursor: pointer;
-}
-
-.icon-button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  line-height: 1;
 }
 
 button:disabled {

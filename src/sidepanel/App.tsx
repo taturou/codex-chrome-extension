@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import type {
   AttachSelectionResult,
   CapturePageContextResult,
@@ -337,13 +337,20 @@ async function openRenameDialog(
   await onRename(thread.id, nextTitle);
 }
 
-function MessageList(props: {
+function MessageList({
+  messages,
+  wsStatus,
+  nowTs,
+  tokenTimestampByMessage,
+  messageErrors,
+  containerRef
+}: {
   messages: Message[];
   wsStatus: WsStatus;
   nowTs: number;
   tokenTimestampByMessage: TokenTimestampByMessage;
   messageErrors: MessageErrors;
-  containerRef?: RefObject<HTMLDivElement | null>;
+  containerRef?: Ref<HTMLDivElement>;
 }): JSX.Element {
   function roleLabel(role: Message['role']): string {
     if (role === 'user') {
@@ -373,9 +380,9 @@ function MessageList(props: {
     return `${body}\n\n---\n\n${attachments}`;
   }
 
-  if (props.messages.length === 0) {
+  if (messages.length === 0) {
     return (
-      <div ref={props.containerRef} className="messages-empty">
+      <div ref={containerRef} className="messages-empty">
         <strong>No messages yet.</strong>
         <small>Start a chat from the input box below.</small>
       </div>
@@ -383,16 +390,16 @@ function MessageList(props: {
   }
 
   return (
-    <div ref={props.containerRef} className="messages">
-      {props.messages.map((message) => {
+    <div ref={containerRef} className="messages">
+      {messages.map((message) => {
         const statusMeta =
           message.role === 'assistant'
             ? getAssistantStatusMeta({
                 message,
-                wsStatus: props.wsStatus,
-                nowTs: props.nowTs,
-                lastTokenTs: props.tokenTimestampByMessage[message.id],
-                errorText: props.messageErrors[message.id]
+                wsStatus,
+                nowTs,
+                lastTokenTs: tokenTimestampByMessage[message.id],
+                errorText: messageErrors[message.id]
               })
             : {
                 label: message.status,
@@ -639,7 +646,7 @@ export function App(): JSX.Element {
     scrollAnimationFrameRef.current = requestAnimationFrame(step);
   }, [currentMessages, shouldScrollToBottom]);
 
-  async function loadThreadsAndMaybeMessages(): Promise<void> {
+  const loadThreadsAndMaybeMessages = useCallback(async (): Promise<void> => {
     const list = await sendCommand<ListThreadsResult>({ type: 'LIST_THREADS', payload: {} });
     setThreads(list.threads);
 
@@ -653,7 +660,7 @@ export function App(): JSX.Element {
       });
       setMessagesByThread((prev) => ({ ...prev, [threadId]: res.messages }));
     }
-  }
+  }, []);
 
   async function loadSettings(): Promise<void> {
     const res = await sendCommand<SettingsResult>({ type: 'GET_SETTINGS', payload: {} });
@@ -690,7 +697,7 @@ export function App(): JSX.Element {
     await loadUsageLimits();
   }
 
-  function applySidePanelEvent(event: SidePanelEvent): void {
+  const applySidePanelEvent = useCallback((event: SidePanelEvent): void => {
     if (event.type === 'WS_STATUS_CHANGED') {
       setStatus(event.payload.status);
       setStatusReason(event.payload.reason ?? '');
@@ -780,7 +787,7 @@ export function App(): JSX.Element {
         return { ...prev, [threadId]: next };
       });
     }
-  }
+  }, [loadThreadsAndMaybeMessages]);
 
   useEffect(() => {
     void loadThreadsAndMaybeMessages();
@@ -795,7 +802,7 @@ export function App(): JSX.Element {
       unlisten();
       clearInterval(intervalId);
     };
-  }, []);
+  }, [applySidePanelEvent, loadThreadsAndMaybeMessages]);
 
   async function createThread(): Promise<void> {
     const res = await sendCommand<CreateThreadResult>({ type: 'CREATE_THREAD', payload: {} });
@@ -1142,18 +1149,20 @@ export function App(): JSX.Element {
       <header className="header">
         <div className="header-main">
           <StatusBadge status={status} />
+          {isConnected ? (
+            <button
+              type="button"
+              onClick={() => void disconnectWs()}
+              className="subtle-action-button"
+              aria-label="Disconnect"
+              title="Disconnect"
+            >
+              Disconnect
+            </button>
+          ) : null}
         </div>
         <div className="header-actions">
           <UsageLimitBars usage={usageLimits} />
-          {isConnected ? (
-            <button type="button" onClick={() => void disconnectWs()} className="icon-button" aria-label="Disconnect">
-              ✕
-            </button>
-          ) : (
-            <button type="button" onClick={() => void connectWs()} className="primary-button">
-              Connect
-            </button>
-          )}
         </div>
       </header>
 
