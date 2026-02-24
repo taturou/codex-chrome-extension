@@ -452,7 +452,7 @@ export class WebSocketTransport {
   private socket: WebSocket | null = null;
   private reconnectTimer: number | null = null;
   private reconnectAttempts = 0;
-  private shouldReconnect = true;
+  private shouldReconnect = false;
   private url = '';
   private skipNextCloseReconnect = false;
   private latestLocalMessageByThread = new Map<string, string>();
@@ -466,6 +466,10 @@ export class WebSocketTransport {
   private retryTimers = new Set<number>();
 
   constructor(private readonly events: TransportEvents) {}
+
+  isConnectRequested(): boolean {
+    return this.shouldReconnect;
+  }
 
   connect(url: string): void {
     this.debug('state', 'connect requested', url);

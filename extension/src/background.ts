@@ -120,7 +120,7 @@ async function setStatus(status: WsStatus, reason?: string): Promise<void> {
   wsReason = reason;
   await broadcast({
     type: 'WS_STATUS_CHANGED',
-    payload: { status, reason }
+    payload: { status, reason, connectRequested: transport.isConnectRequested() }
   });
 }
 
@@ -900,14 +900,14 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
       const url = command.payload.url?.trim() || settings.wsUrl || DEFAULT_WS_URL;
       const allowedUrl = assertUrlAllowedByPermissionPolicy(url, getPermissionPolicy(), 'WebSocket URL');
       transport.reconnectNow(allowedUrl);
-      return { status: wsStatus, reason: wsReason };
+      return { status: wsStatus, reason: wsReason, connectRequested: transport.isConnectRequested() };
     }
     case 'DISCONNECT_WS': {
       transport.disconnect();
-      return { status: wsStatus, reason: wsReason };
+      return { status: wsStatus, reason: wsReason, connectRequested: transport.isConnectRequested() };
     }
     case 'GET_WS_STATUS': {
-      return { status: wsStatus, reason: wsReason };
+      return { status: wsStatus, reason: wsReason, connectRequested: transport.isConnectRequested() };
     }
     case 'GET_USAGE_LIMITS': {
       const result: UsageLimitsResult = { usage: usageLimits };
@@ -1115,7 +1115,7 @@ chrome.runtime.onConnect.addListener((port) => {
   try {
     port.postMessage({
       type: 'WS_STATUS_CHANGED',
-      payload: { status: wsStatus, reason: wsReason }
+      payload: { status: wsStatus, reason: wsReason, connectRequested: transport.isConnectRequested() }
     } satisfies SidePanelEvent);
     port.postMessage({
       type: 'USAGE_LIMITS_UPDATED',

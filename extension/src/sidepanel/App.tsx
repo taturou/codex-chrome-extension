@@ -529,6 +529,7 @@ export function App(): JSX.Element {
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const [status, setStatus] = useState<WsStatus>('disconnected');
   const [statusReason, setStatusReason] = useState<string>('');
+  const [connectRequested, setConnectRequested] = useState(false);
   const [wsUrl, setWsUrl] = useState('');
   const [wsLogs, setWsLogs] = useState<WsDebugLogEntry[]>([]);
   const [copyNotice, setCopyNotice] = useState('');
@@ -560,6 +561,8 @@ export function App(): JSX.Element {
 
   const hasThread = Boolean(currentThreadId);
   const isConnected = status === 'connected';
+  const shouldShowDisconnect = connectRequested && !isConnected;
+  const statusBadgeValue: WsStatus = isConnected ? 'connected' : connectRequested ? 'disconnected' : status;
   const hasStreamingMessage = useMemo(
     () => currentMessages.some((msg) => msg.role === 'assistant' && msg.status === 'streaming'),
     [currentMessages]
@@ -717,6 +720,7 @@ export function App(): JSX.Element {
     const res = await sendCommand<WsStatusResult>({ type: 'GET_WS_STATUS', payload: {} });
     setStatus(res.status);
     setStatusReason(res.reason ?? '');
+    setConnectRequested(Boolean(res.connectRequested));
   }
 
   async function loadUsageLimits(): Promise<void> {
@@ -747,6 +751,7 @@ export function App(): JSX.Element {
     if (event.type === 'WS_STATUS_CHANGED') {
       setStatus(event.payload.status);
       setStatusReason(event.payload.reason ?? '');
+      setConnectRequested(Boolean(event.payload.connectRequested));
       return;
     }
 
@@ -1165,6 +1170,7 @@ export function App(): JSX.Element {
       const policy = extractPermissionPolicy(chrome.runtime.getManifest());
       const nextUrl = assertUrlAllowedByPermissionPolicy(wsUrl, policy, 'WebSocket URL');
       setWsUrl(nextUrl);
+      setConnectRequested(true);
       await sendCommand({ type: 'CONNECT_WS', payload: { url: nextUrl } });
       await loadWsStatus();
       await refreshUsageLimitsWithRetry();
@@ -1177,6 +1183,7 @@ export function App(): JSX.Element {
 
   async function disconnectWs(): Promise<void> {
     try {
+      setConnectRequested(false);
       await sendCommand({ type: 'DISCONNECT_WS', payload: {} });
       await loadWsStatus();
       setStatusReason('');
@@ -1224,12 +1231,12 @@ export function App(): JSX.Element {
     <div className="app">
       <header className="header">
         <div className="header-main">
-          <StatusBadge status={status} />
+          <StatusBadge status={statusBadgeValue} />
           {isConnected ? (
             <button
               type="button"
               onClick={() => void disconnectWs()}
-              className="subtle-action-button"
+              className="subtle-action-button disconnect-button"
               aria-label="Disconnect"
               title="Disconnect"
             >
@@ -1255,9 +1262,15 @@ export function App(): JSX.Element {
             <button type="button" onClick={() => void saveSettings()}>
               Save URL
             </button>
-            <button type="button" onClick={() => void connectWs()} className="primary-button">
-              Connect
-            </button>
+            {shouldShowDisconnect ? (
+              <button type="button" onClick={() => void disconnectWs()} className="primary-button disconnect-button">
+                Disconnect
+              </button>
+            ) : (
+              <button type="button" onClick={() => void connectWs()} className="primary-button">
+                Connect
+              </button>
+            )}
           </div>
           <small>Threads and chat will appear after connecting.</small>
           <small>Press Ctrl+Shift+D to show WS debug logs.</small>
@@ -1282,7 +1295,7 @@ export function App(): JSX.Element {
                 ) : null}
                 <MessageList
                   messages={currentMessages}
-                  wsStatus={status}
+                  wsStatus={statusBadgeValue}
                   nowTs={nowTs}
                   tokenTimestampByMessage={tokenTimestampByMessage}
                   messageErrors={messageErrors}

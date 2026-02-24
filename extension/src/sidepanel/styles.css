@@ -94,6 +94,15 @@ body {
   outline-offset: 1px;
 }
 
+.subtle-action-button.disconnect-button {
+  color: #b91c1c;
+}
+
+.subtle-action-button.disconnect-button:hover {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
 .status {
   border-radius: 9999px;
   padding: 2px 10px;
@@ -171,6 +180,12 @@ textarea:focus-visible {
   background: #1d4ed8;
   color: #fff;
   border-color: #1d4ed8;
+}
+
+.primary-button.disconnect-button {
+  background: #dc2626;
+  color: #fff;
+  border-color: #b91c1c;
 }
 
 .connection-gate {

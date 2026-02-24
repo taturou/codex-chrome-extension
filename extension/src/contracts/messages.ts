@@ -30,7 +30,7 @@ export type RuntimeCommand =
   | RuntimeEnvelope<'GET_SETTINGS', Record<string, never>>;
 
 export type SidePanelEvent =
-  | RuntimeEnvelope<'WS_STATUS_CHANGED', { status: WsStatus; reason?: string }>
+  | RuntimeEnvelope<'WS_STATUS_CHANGED', { status: WsStatus; reason?: string; connectRequested?: boolean }>
   | RuntimeEnvelope<'WS_DEBUG_LOG', { entry: WsDebugLogEntry }>
   | RuntimeEnvelope<'USAGE_LIMITS_UPDATED', { usage: UsageLimits }>
   | RuntimeEnvelope<'THREADS_UPDATED', { reason: 'import_threads' }>
@@ -78,6 +78,7 @@ export interface AttachSelectionResult {
 export interface WsStatusResult {
   status: WsStatus;
   reason?: string;
+  connectRequested?: boolean;
 }
 
 export interface UsageLimitsResult {
