@@ -15,6 +15,13 @@ import type { Attachment, Message, Thread, UsageLimits, WsStatus } from './contr
 import { StorageRepository } from './storage/repository';
 import { DEFAULT_WS_URL } from './shared/constants';
 import { createId } from './shared/id';
+import { EXPECTED_PERMISSION_POLICY_SHA256 } from './shared/manifestPolicy';
+import {
+  assertUrlAllowedByPermissionPolicy,
+  extractPermissionPolicy,
+  serializePermissionPolicy,
+  sha256Hex
+} from './shared/permissionPolicy';
 import { SIDEPANEL_EVENT_PORT_NAME } from './shared/runtimePorts';
 import { WebSocketTransport } from './transport/wsTransport';
 import TurndownService from 'turndown';
@@ -29,6 +36,25 @@ let usageLimits: UsageLimits = {
   rateLimits: [],
   updatedAt: 0
 };
+let manifestPolicyIntegrityPromise: Promise<void> | undefined;
+
+function getPermissionPolicy() {
+  return extractPermissionPolicy(chrome.runtime.getManifest());
+}
+
+async function ensureManifestPolicyIntegrity(): Promise<void> {
+  if (!manifestPolicyIntegrityPromise) {
+    manifestPolicyIntegrityPromise = (async () => {
+      const currentManifest = chrome.runtime.getManifest();
+      const currentPolicy = extractPermissionPolicy(currentManifest);
+      const currentHash = await sha256Hex(serializePermissionPolicy(currentPolicy));
+      if (currentHash !== EXPECTED_PERMISSION_POLICY_SHA256) {
+        throw new Error('Manifest permission policy mismatch detected. Extension is blocked.');
+      }
+    })();
+  }
+  await manifestPolicyIntegrityPromise;
+}
 
 function ensureDocumentForTurndown(): void {
   if (typeof document !== 'undefined') {
@@ -318,6 +344,7 @@ async function ensureTabHostPermission(tab: chrome.tabs.Tab): Promise<void> {
   if (protocol !== 'http:' && protocol !== 'https:') {
     throw new Error(`Selection attachment is not available on this page (${protocol})`);
   }
+  assertUrlAllowedByPermissionPolicy(tab.url, getPermissionPolicy(), 'Tab URL');
 
   const originPattern = getTabOriginPattern(tab.url);
   const hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
@@ -865,11 +892,14 @@ async function capturePageContext(
 }
 
 async function handleCommand(command: RuntimeCommand): Promise<unknown> {
+  await ensureManifestPolicyIntegrity();
+
   switch (command.type) {
     case 'CONNECT_WS': {
       const settings = await repository.getSettings();
       const url = command.payload.url?.trim() || settings.wsUrl || DEFAULT_WS_URL;
-      transport.reconnectNow(url);
+      const allowedUrl = assertUrlAllowedByPermissionPolicy(url, getPermissionPolicy(), 'WebSocket URL');
+      transport.reconnectNow(allowedUrl);
       return { status: wsStatus, reason: wsReason };
     }
     case 'DISCONNECT_WS': {
@@ -1024,7 +1054,8 @@ async function handleCommand(command: RuntimeCommand): Promise<unknown> {
     }
     case 'SAVE_SETTINGS': {
       const wsUrl = command.payload.wsUrl.trim() || DEFAULT_WS_URL;
-      const settings = await repository.saveSettings({ wsUrl });
+      const allowedUrl = assertUrlAllowedByPermissionPolicy(wsUrl, getPermissionPolicy(), 'WebSocket URL');
+      const settings = await repository.saveSettings({ wsUrl: allowedUrl });
       const result: SettingsResult = { settings };
       return result;
     }

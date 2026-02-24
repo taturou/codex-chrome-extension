@@ -14,6 +14,11 @@ import type {
 } from '../contracts/messages';
 import type { Attachment, Message, RateLimitItem, Thread, UsageLimits, WsDebugLogEntry, WsStatus } from '../contracts/types';
 import { SafeMarkdown } from '../shared/markdown';
+import {
+  assertUrlAllowedByPermissionPolicy,
+  extractPermissionPolicy,
+  isUrlAllowedByPermissionPolicy
+} from '../shared/permissionPolicy';
 import { sendCommand, listenEvents } from '../shared/runtime';
 
 interface MessagesByThread {
@@ -461,6 +466,8 @@ async function requestActiveTabHostPermission(tab: chrome.tabs.Tab): Promise<voi
   if (!tab.url) {
     throw new Error('Failed to get tab URL');
   }
+  const policy = extractPermissionPolicy(chrome.runtime.getManifest());
+  assertUrlAllowedByPermissionPolicy(tab.url, policy, 'Tab URL');
   const originPattern = getTabOriginPattern(tab.url);
   const hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
   if (hasPermission) {
@@ -529,6 +536,7 @@ export function App(): JSX.Element {
   const [contextMode, setContextMode] = useState<ContextMode>('chat_only');
   const [domSelectionActive, setDomSelectionActive] = useState(false);
   const [domSelectionCount, setDomSelectionCount] = useState(0);
+  const [domSelectionUnavailableReason, setDomSelectionUnavailableReason] = useState('');
   const [tokenTimestampByMessage, setTokenTimestampByMessage] = useState<TokenTimestampByMessage>({});
   const [messageErrors, setMessageErrors] = useState<MessageErrors>({});
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -558,6 +566,7 @@ export function App(): JSX.Element {
   );
   const chatStalledByConnection = hasStreamingMessage && status !== 'connected';
   const contextArmed = contextMode !== 'chat_only';
+  const isDomSelectionUnavailable = domSelectionUnavailableReason.length > 0;
   const hasAnyContentForSend = Boolean(input.trim() || pendingAttachments.length > 0 || contextArmed);
   const composerDisabled = !hasThread || !isConnected;
 
@@ -659,6 +668,43 @@ export function App(): JSX.Element {
         payload: { threadId }
       });
       setMessagesByThread((prev) => ({ ...prev, [threadId]: res.messages }));
+    }
+  }, []);
+
+  const refreshDomSelectionAvailability = useCallback(async (): Promise<void> => {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const activeTab = tabs[0];
+      if (!activeTab?.url) {
+        setDomSelectionUnavailableReason('Active tab URL is unavailable.');
+        return;
+      }
+
+      const policy = extractPermissionPolicy(chrome.runtime.getManifest());
+      if (policy.optionalHostPermissions.length === 0) {
+        setDomSelectionUnavailableReason('optional_host_permissions is empty.');
+        return;
+      }
+
+      const protocol = getTabProtocol(activeTab.url);
+      if (protocol !== 'http:' && protocol !== 'https:') {
+        setDomSelectionUnavailableReason(`This page protocol is not supported (${protocol}).`);
+        return;
+      }
+
+      const optionalOnlyPolicy = {
+        hostPermissions: [] as string[],
+        optionalHostPermissions: policy.optionalHostPermissions
+      };
+      if (!isUrlAllowedByPermissionPolicy(activeTab.url, optionalOnlyPolicy)) {
+        setDomSelectionUnavailableReason('This site is not included in optional_host_permissions.');
+        return;
+      }
+
+      setDomSelectionUnavailableReason('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setDomSelectionUnavailableReason(`Failed to evaluate active tab: ${message}`);
     }
   }, []);
 
@@ -803,6 +849,30 @@ export function App(): JSX.Element {
       clearInterval(intervalId);
     };
   }, [applySidePanelEvent, loadThreadsAndMaybeMessages]);
+
+  useEffect(() => {
+    void refreshDomSelectionAvailability();
+
+    const onActivated = (): void => {
+      void refreshDomSelectionAvailability();
+    };
+    const onUpdated = (_tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab): void => {
+      if (!tab.active) {
+        return;
+      }
+      if (!changeInfo.url && changeInfo.status !== 'complete') {
+        return;
+      }
+      void refreshDomSelectionAvailability();
+    };
+
+    chrome.tabs.onActivated.addListener(onActivated);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    return () => {
+      chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    };
+  }, [refreshDomSelectionAvailability]);
 
   async function createThread(): Promise<void> {
     const res = await sendCommand<CreateThreadResult>({ type: 'CREATE_THREAD', payload: {} });
@@ -1092,7 +1162,10 @@ export function App(): JSX.Element {
 
   async function connectWs(): Promise<void> {
     try {
-      await sendCommand({ type: 'CONNECT_WS', payload: { url: wsUrl } });
+      const policy = extractPermissionPolicy(chrome.runtime.getManifest());
+      const nextUrl = assertUrlAllowedByPermissionPolicy(wsUrl, policy, 'WebSocket URL');
+      setWsUrl(nextUrl);
+      await sendCommand({ type: 'CONNECT_WS', payload: { url: nextUrl } });
       await loadWsStatus();
       await refreshUsageLimitsWithRetry();
       setStatusReason('');
@@ -1114,7 +1187,10 @@ export function App(): JSX.Element {
   }
 
   async function saveSettings(): Promise<void> {
-    await sendCommand({ type: 'SAVE_SETTINGS', payload: { wsUrl } });
+    const policy = extractPermissionPolicy(chrome.runtime.getManifest());
+    const nextUrl = assertUrlAllowedByPermissionPolicy(wsUrl, policy, 'WebSocket URL');
+    setWsUrl(nextUrl);
+    await sendCommand({ type: 'SAVE_SETTINGS', payload: { wsUrl: nextUrl } });
     setStatusReason('Connection URL saved.');
   }
 
@@ -1247,16 +1323,21 @@ export function App(): JSX.Element {
                     type="button"
                     className={`context-chip ${contextMode === 'dom' ? 'active' : ''}`}
                     onClick={() => void changeContextMode('dom')}
-                    disabled={!isConnected}
+                    disabled={!isConnected || isDomSelectionUnavailable}
                   >
                     DOM selection
                   </button>
+                  {isDomSelectionUnavailable ? <small>{domSelectionUnavailableReason}</small> : null}
                   {contextMode === 'dom' ? (
                     <>
                       <span className={`dom-mode-state ${domSelectionActive ? 'active' : 'inactive'}`}>
                         {domSelectionActive ? 'Active' : 'Idle'}: {domSelectionCount} items
                       </span>
-                      <button type="button" onClick={() => void clearDomSelectionMode()} disabled={!isConnected}>
+                      <button
+                        type="button"
+                        onClick={() => void clearDomSelectionMode()}
+                        disabled={!isConnected || isDomSelectionUnavailable}
+                      >
                         Clear DOM
                       </button>
                     </>

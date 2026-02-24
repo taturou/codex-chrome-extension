@@ -6,6 +6,7 @@ import type {
   SettingsResult
 } from '../contracts/messages';
 import type { Thread, ThreadArchive } from '../contracts/types';
+import { assertUrlAllowedByPermissionPolicy, extractPermissionPolicy } from '../shared/permissionPolicy';
 import { sendCommand } from '../shared/runtime';
 
 function sanitizeFilePart(input: string): string {
@@ -91,12 +92,18 @@ export function App(): JSX.Element {
   }, [loadThreads]);
 
   async function save(): Promise<void> {
-    await sendCommand({ type: 'SAVE_SETTINGS', payload: { wsUrl } });
+    const policy = extractPermissionPolicy(chrome.runtime.getManifest());
+    const nextUrl = assertUrlAllowedByPermissionPolicy(wsUrl, policy, 'WebSocket URL');
+    setWsUrl(nextUrl);
+    await sendCommand({ type: 'SAVE_SETTINGS', payload: { wsUrl: nextUrl } });
     setSettingsNotice('Saved.');
   }
 
   async function connect(): Promise<void> {
-    await sendCommand({ type: 'CONNECT_WS', payload: { url: wsUrl } });
+    const policy = extractPermissionPolicy(chrome.runtime.getManifest());
+    const nextUrl = assertUrlAllowedByPermissionPolicy(wsUrl, policy, 'WebSocket URL');
+    setWsUrl(nextUrl);
+    await sendCommand({ type: 'CONNECT_WS', payload: { url: nextUrl } });
     setSettingsNotice('Connect request sent.');
   }
 
