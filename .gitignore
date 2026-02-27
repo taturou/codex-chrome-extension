@@ -11,6 +11,9 @@ node_modules
 .codex/package.json
 .codex/shell_snapshots
 .codex/skills/.system
+.codex/state_5.sqlite
+.codex/state_5.sqlite-shm
+.codex/state_5.sqlite-wal
 .codex/tmp
 .codex/version.json
 .venv

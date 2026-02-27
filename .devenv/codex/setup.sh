@@ -80,6 +80,9 @@ $CODEX_HOME_RELATIVE/package-lock.json
 $CODEX_HOME_RELATIVE/package.json
 $CODEX_HOME_RELATIVE/shell_snapshots
 $CODEX_HOME_RELATIVE/skills/.system
+$CODEX_HOME_RELATIVE/state_5.sqlite
+$CODEX_HOME_RELATIVE/state_5.sqlite-shm
+$CODEX_HOME_RELATIVE/state_5.sqlite-wal
 $CODEX_HOME_RELATIVE/tmp
 $CODEX_HOME_RELATIVE/version.json
 "
