@@ -10,7 +10,8 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "zip": "node scripts/zip-dist.mjs"
   },
   "dependencies": {
     "@openai/codex": "^0.104.0",
